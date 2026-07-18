@@ -636,8 +636,8 @@ function CalibrationScreen({
         <div className="panel-heading"><div><span>1. Scale the on-screen ruler</span><strong>{round(rulerScale, 2)} px/mm</strong></div></div>
         <div className="scale-control">
           <button aria-label="Reduce ruler scale" onClick={() => onScale(Math.max(2.5, round(rulerScale - 0.02, 2)))}>−</button>
-          <input aria-label="Ruler scale" type="range" min="2.5" max="5" step="0.01" value={rulerScale} onChange={(event) => onScale(Number(event.target.value))} />
-          <button aria-label="Increase ruler scale" onClick={() => onScale(Math.min(5, round(rulerScale + 0.02, 2)))}>+</button>
+          <input aria-label="Ruler scale" type="range" min="2.5" max="10" step="0.01" value={rulerScale} onChange={(event) => onScale(Number(event.target.value))} />
+          <button aria-label="Increase ruler scale" onClick={() => onScale(Math.min(10, round(rulerScale + 0.02, 2)))}>+</button>
         </div>
         <p className="hint">Lay a real ruler against the bottom scale. Adjust until its marks line up.</p>
       </section>
