@@ -6,16 +6,26 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from
 type Screen = "measure" | "calibration" | "settings";
 type Orientation = "face_up" | "face_down" | "top_edge" | "bottom_edge" | "left_edge" | "right_edge" | "unknown";
 type EngineState = "idle" | "arming" | "ready" | "moving" | "cooldown";
-type CalibrationPhase = "scale" | "start" | "turns" | "complete";
+type CalibrationPhase = "scale" | "start" | "rolling" | "complete";
 type Vec = { x: number; y: number; z: number };
 type MotionSample = { gravity: Vec; acceleration: Vec; rotation: Vec; orientation: Orientation; gravityMagnitude: number; at: number };
 type ApplePermissionEvent = { requestPermission?: () => Promise<"granted" | "denied"> };
-
-const STORE = {
-  calibration: "phoneroll.tape-calibration.v2",
-  rulerScale: "phoneroll.ruler-scale.v1",
+type QuarterTurn = { from: Orientation; to: Orientation };
+type SavedCalibration = { values: number[]; orientationOrder: Orientation[] };
+type CalibrationRuntime = {
+  lastAlignment: number;
+  turnCount: number;
+  draftValues: Array<number | null>;
+  orientationOrder: Orientation[];
+  pending: QuarterTurn | null;
+  predictedMm: number | null;
 };
 
+const STORE = {
+  calibration: "phoneroll.tape-calibration.v3",
+  legacyCalibration: "phoneroll.tape-calibration.v2",
+  rulerScale: "phoneroll.ruler-scale.v1",
+};
 const TAPE_INCHES = 60;
 const TAPE_TICKS = Array.from({ length: TAPE_INCHES * 16 + 1 }, (_, division) => ({
   division,
@@ -33,6 +43,7 @@ const dot = (a: Vec, b: Vec) => a.x * b.x + a.y * b.y + a.z * b.z;
 const cross = (a: Vec, b: Vec): Vec => ({ x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x });
 const safeNumber = (value: number | null | undefined) => Number.isFinite(value) ? Number(value) : 0;
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
+const emptyRuntime = (): CalibrationRuntime => ({ lastAlignment: 0, turnCount: 0, draftValues: [null, null, null, null], orientationOrder: [], pending: null, predictedMm: null });
 
 const orientationFromGravity = (vector: Vec): Orientation => {
   const v = normalize(vector);
@@ -45,6 +56,16 @@ const orientationFromGravity = (vector: Vec): Orientation => {
   return largest > 0.8 ? name : "unknown";
 };
 
+const orientationName = (orientation: Orientation) => ({
+  face_up: "face up",
+  face_down: "face down",
+  top_edge: "top edge",
+  bottom_edge: "upright / bottom edge",
+  left_edge: "left edge",
+  right_edge: "right edge",
+  unknown: "waiting for orientation",
+}[orientation]);
+
 const loadJSON = <T,>(key: string, fallback: T): T => {
   try {
     const saved = localStorage.getItem(key);
@@ -54,7 +75,20 @@ const loadJSON = <T,>(key: string, fallback: T): T => {
   }
 };
 
-/** Kept off-screen: only settled, perpendicular quarter turns advance the tape. */
+const readSavedCalibration = (): SavedCalibration => {
+  const saved = loadJSON<unknown>(STORE.calibration, null);
+  if (saved && typeof saved === "object" && !Array.isArray(saved)) {
+    const value = saved as SavedCalibration;
+    return {
+      values: Array.isArray(value.values) && value.values.length === 4 ? value.values : [0, 0, 0, 0],
+      orientationOrder: Array.isArray(value.orientationOrder) ? value.orientationOrder.slice(0, 4) : [],
+    };
+  }
+  const legacy = loadJSON<number[]>(STORE.legacyCalibration, [0, 0, 0, 0]);
+  return { values: legacy.length === 4 ? legacy : [0, 0, 0, 0], orientationOrder: [] };
+};
+
+/** Accepts only a settled 90° roll and keeps opposite-direction movements out. */
 class QuarterTurnEngine {
   private state: EngineState = "idle";
   private source: { orientation: Orientation; vector: Vec } | null = null;
@@ -106,8 +140,8 @@ class QuarterTurnEngine {
     this.candidate = null;
   }
 
-  update(sample: MotionSample) {
-    if (this.state === "idle") return false;
+  update(sample: MotionSample): QuarterTurn | null {
+    if (this.state === "idle") return null;
     const acceleration = magnitude(sample.acceleration);
     const rotation = magnitude(sample.rotation);
     const gravityOK = sample.gravityMagnitude >= 7.2 && sample.gravityMagnitude <= 12.5;
@@ -115,16 +149,15 @@ class QuarterTurnEngine {
     const unstableDuringRoll = (!gravityOK && sample.gravityMagnitude > 0.2) || acceleration > 5.7 || rotation > 620;
     if ((this.state === "moving" || this.state === "cooldown") && unstableDuringRoll) {
       this.rearm();
-      return false;
+      return null;
     }
     const stableLongEnough = this.noteCandidate(sample, stable);
-
     if (this.state === "arming") {
       if (stableLongEnough && this.candidate) {
         this.source = { orientation: this.candidate.orientation, vector: this.candidate.vector };
         this.state = "ready";
       }
-      return false;
+      return null;
     }
     if (this.state === "ready") {
       if (!stable || sample.orientation !== this.source?.orientation) {
@@ -132,32 +165,34 @@ class QuarterTurnEngine {
         this.startedAt = sample.at;
         this.candidate = null;
       }
-      return false;
+      return null;
     }
     if (this.state === "cooldown") {
-      if (!stable) { this.rearm(); return false; }
+      if (!stable) { this.rearm(); return null; }
       if (sample.at >= this.cooldownUntil && stableLongEnough && this.candidate) {
         this.source = { orientation: this.candidate.orientation, vector: this.candidate.vector };
         this.state = "ready";
       }
-      return false;
+      return null;
     }
-    if (this.state !== "moving" || !this.source) return false;
+    if (this.state !== "moving" || !this.source) return null;
     const elapsed = sample.at - this.startedAt;
-    if (elapsed > 2600) { this.rearm(); return false; }
-    if (!stableLongEnough || !this.candidate) return false;
+    if (elapsed > 2600 || !stableLongEnough || !this.candidate) {
+      if (elapsed > 2600) this.rearm();
+      return null;
+    }
     const alignment = dot(this.source.vector, this.candidate.vector);
     if (this.candidate.orientation === this.source.orientation || alignment < -0.55 || Math.abs(alignment) > 0.38 || elapsed < 95) {
       this.rearm();
-      return false;
+      return null;
     }
     const axis = normalize(cross(this.source.vector, this.candidate.vector));
-    if (this.rollAxis && dot(axis, this.rollAxis) < 0.42) { this.rearm(); return false; }
+    if (this.rollAxis && dot(axis, this.rollAxis) < 0.42) { this.rearm(); return null; }
     this.rollAxis ??= axis;
     this.accepted += 1;
     this.state = "cooldown";
     this.cooldownUntil = sample.at + 320;
-    return true;
+    return { from: this.source.orientation, to: this.candidate.orientation };
   }
 }
 
@@ -166,150 +201,216 @@ export default function Home() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [rulerScale, setRulerScale] = useState(3.78);
   const [calibration, setCalibration] = useState<number[]>([0, 0, 0, 0]);
-  const [tapeOffset, setTapeOffset] = useState(16);
+  const [calibrationOrder, setCalibrationOrder] = useState<Orientation[]>([]);
+  const [tapeOffset, setTapeOffset] = useState(18);
   const [reversed, setReversed] = useState(false);
   const [motionEnabled, setMotionEnabled] = useState(false);
   const [calibrationPhase, setCalibrationPhase] = useState<CalibrationPhase>("scale");
-  const [turnIndex, setTurnIndex] = useState(0);
-  const [cornerSegments, setCornerSegments] = useState<Array<number | null>>([null, null, null, null]);
-  const [lastAlignment, setLastAlignment] = useState(0);
+  const [detectedOrientation, setDetectedOrientation] = useState<Orientation>("unknown");
+  const [calibrationTurns, setCalibrationTurns] = useState(0);
+  const [predictedDistance, setPredictedDistance] = useState<number | null>(null);
   const [calibrationNotice, setCalibrationNotice] = useState("");
 
   const detector = useRef(new QuarterTurnEngine());
   const calibrationRef = useRef(calibration);
+  const calibrationOrderRef = useRef(calibrationOrder);
   const rulerScaleRef = useRef(rulerScale);
   const reversedRef = useRef(reversed);
   const motionEnabledRef = useRef(motionEnabled);
+  const screenRef = useRef(screen);
+  const calibrationPhaseRef = useRef(calibrationPhase);
+  const detectedOrientationRef = useRef(detectedOrientation);
+  const calibrationRuntime = useRef<CalibrationRuntime>(emptyRuntime());
 
   useEffect(() => {
     const savedScale = Number(localStorage.getItem(STORE.rulerScale) ?? 3.78);
-    const savedCalibration = loadJSON<number[]>(STORE.calibration, [0, 0, 0, 0]);
+    const savedCalibration = readSavedCalibration();
     setRulerScale(clamp(Number.isFinite(savedScale) ? savedScale : 3.78, 2.5, 10));
-    setCalibration(savedCalibration.length === 4 ? savedCalibration : [0, 0, 0, 0]);
+    setCalibration(savedCalibration.values);
+    setCalibrationOrder(savedCalibration.orientationOrder);
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => undefined);
   }, []);
-
-  useEffect(() => { calibrationRef.current = calibration; localStorage.setItem(STORE.calibration, JSON.stringify(calibration)); }, [calibration]);
+  useEffect(() => { calibrationRef.current = calibration; localStorage.setItem(STORE.calibration, JSON.stringify({ values: calibration, orientationOrder: calibrationOrderRef.current })); }, [calibration]);
+  useEffect(() => { calibrationOrderRef.current = calibrationOrder; localStorage.setItem(STORE.calibration, JSON.stringify({ values: calibrationRef.current, orientationOrder: calibrationOrder })); }, [calibrationOrder]);
   useEffect(() => { rulerScaleRef.current = rulerScale; localStorage.setItem(STORE.rulerScale, String(rulerScale)); }, [rulerScale]);
   useEffect(() => { reversedRef.current = reversed; }, [reversed]);
   useEffect(() => { motionEnabledRef.current = motionEnabled; }, [motionEnabled]);
+  useEffect(() => { screenRef.current = screen; }, [screen]);
+  useEffect(() => { calibrationPhaseRef.current = calibrationPhase; }, [calibrationPhase]);
+  useEffect(() => { detectedOrientationRef.current = detectedOrientation; }, [detectedOrientation]);
 
   useEffect(() => {
     const readMotion = (event: DeviceMotionEvent) => {
       if (!motionEnabledRef.current) return;
-      const gravity = event.accelerationIncludingGravity
-        ? { x: safeNumber(event.accelerationIncludingGravity.x), y: safeNumber(event.accelerationIncludingGravity.y), z: safeNumber(event.accelerationIncludingGravity.z) }
-        : blank();
-      const acceleration = event.acceleration
-        ? { x: safeNumber(event.acceleration.x), y: safeNumber(event.acceleration.y), z: safeNumber(event.acceleration.z) }
-        : blank();
-      const rotation = event.rotationRate
-        ? { x: safeNumber(event.rotationRate.alpha), y: safeNumber(event.rotationRate.beta), z: safeNumber(event.rotationRate.gamma) }
-        : blank();
-      const sample: MotionSample = {
-        gravity,
-        acceleration,
-        rotation,
-        orientation: orientationFromGravity(gravity),
-        gravityMagnitude: magnitude(gravity),
-        at: event.timeStamp || performance.now(),
-      };
-      if (!detector.current.update(sample)) return;
+      const gravity = event.accelerationIncludingGravity ? { x: safeNumber(event.accelerationIncludingGravity.x), y: safeNumber(event.accelerationIncludingGravity.y), z: safeNumber(event.accelerationIncludingGravity.z) } : blank();
+      const acceleration = event.acceleration ? { x: safeNumber(event.acceleration.x), y: safeNumber(event.acceleration.y), z: safeNumber(event.acceleration.z) } : blank();
+      const rotation = event.rotationRate ? { x: safeNumber(event.rotationRate.alpha), y: safeNumber(event.rotationRate.beta), z: safeNumber(event.rotationRate.gamma) } : blank();
+      const sample: MotionSample = { gravity, acceleration, rotation, orientation: orientationFromGravity(gravity), gravityMagnitude: magnitude(gravity), at: event.timeStamp || performance.now() };
+      if (detectedOrientationRef.current !== sample.orientation) {
+        detectedOrientationRef.current = sample.orientation;
+        setDetectedOrientation(sample.orientation);
+      }
+      const turn = detector.current.update(sample);
+      if (!turn) return;
+
+      if (screenRef.current === "calibration" && calibrationPhaseRef.current === "rolling") {
+        const runtime = calibrationRuntime.current;
+        if (runtime.pending) return;
+        const index = runtime.turnCount % 4;
+        const estimate = runtime.draftValues[index] ?? (runtime.turnCount >= 2 ? runtime.draftValues[index % 2] : null);
+        runtime.pending = turn;
+        runtime.predictedMm = estimate;
+        runtime.orientationOrder[index] = turn.from;
+        runtime.orientationOrder[(index + 1) % 4] = turn.to;
+        if (estimate) {
+          const movement = estimate * rulerScaleRef.current;
+          setTapeOffset((current) => current + (reversedRef.current ? movement : -movement));
+          setPredictedDistance(estimate);
+          setCalibrationNotice("Predicted the next mark from the matching edge. Nudge the tape only if it needs it.");
+        } else {
+          setPredictedDistance(null);
+          setCalibrationNotice("No estimate yet—drag the tape to the matching mark, then save this alignment.");
+        }
+        detector.current.stop();
+        return;
+      }
+
       const saved = calibrationRef.current;
       if (saved.some((value) => value <= 0)) return;
-      const corner = saved[(detector.current.getAccepted() - 1) % 4];
-      const movement = (corner / 25.4) * rulerScaleRef.current * 25.4;
-      setTapeOffset((current) => current + (reversedRef.current ? movement : -movement));
+      const mappedIndex = calibrationOrderRef.current.indexOf(turn.from);
+      const corner = saved[mappedIndex >= 0 ? mappedIndex : (detector.current.getAccepted() - 1) % 4];
+      setTapeOffset((current) => current + (reversedRef.current ? corner * rulerScaleRef.current : -corner * rulerScaleRef.current));
     };
     window.addEventListener("devicemotion", readMotion, true);
     return () => window.removeEventListener("devicemotion", readMotion, true);
   }, []);
 
   const enableMotion = async () => {
-    if (motionEnabledRef.current) return;
+    if (motionEnabledRef.current) return true;
     try {
       const motion = DeviceMotionEvent as unknown as ApplePermissionEvent;
       const orientation = DeviceOrientationEvent as unknown as ApplePermissionEvent;
       const requested = [motion, orientation].filter((event) => typeof event.requestPermission === "function");
       if (requested.length) {
         const decisions = await Promise.all(requested.map((event) => event.requestPermission?.()));
-        if (decisions.some((decision) => decision !== "granted")) return;
+        if (decisions.some((decision) => decision !== "granted")) return false;
       }
       detector.current.reset();
+      motionEnabledRef.current = true;
       setMotionEnabled(true);
+      return true;
     } catch {
-      // The tape stays readable even when a browser does not expose motion permission.
+      return false;
     }
   };
 
+  const resetTapeZero = (forReversed = reversedRef.current) => {
+    const viewportWidth = typeof window === "undefined" ? 390 : window.innerWidth;
+    setTapeOffset(forReversed ? Math.max(18, viewportWidth - 18) : 18);
+  };
+  const chooseDirection = (nextReversed: boolean) => {
+    setReversed(nextReversed);
+    reversedRef.current = nextReversed;
+    resetTapeZero(nextReversed);
+    if (motionEnabledRef.current) detector.current.reset();
+  };
   const openCalibration = () => {
     detector.current.stop();
+    motionEnabledRef.current = false;
     setMotionEnabled(false);
     setMenuOpen(false);
     setCalibrationPhase("scale");
-    setTurnIndex(0);
-    setCornerSegments([null, null, null, null]);
+    setCalibrationTurns(0);
+    setPredictedDistance(null);
+    calibrationRuntime.current = emptyRuntime();
     setCalibrationNotice("");
     setScreen("calibration");
   };
-  const openSettings = () => { detector.current.stop(); setMotionEnabled(false); setMenuOpen(false); setScreen("settings"); };
-  const saveScale = () => { setCalibrationNotice(""); setCalibrationPhase("start"); };
-  const captureStart = () => {
-    setLastAlignment(tapeOffset);
-    setCornerSegments([null, null, null, null]);
-    setCalibrationNotice("");
-    setTurnIndex(0);
-    setCalibrationPhase("turns");
+  const openSettings = () => {
+    detector.current.stop();
+    motionEnabledRef.current = false;
+    setMotionEnabled(false);
+    setMenuOpen(false);
+    setScreen("settings");
   };
-  const saveCorner = () => {
-    const skippedPoint = reversed ? 2 : 1;
-    if (turnIndex === skippedPoint) {
-      setCalibrationNotice("");
-      setTurnIndex(turnIndex + 1);
+  const saveScale = async () => {
+    const enabled = await enableMotion();
+    if (!enabled) {
+      setCalibrationNotice("Allow Motion & Orientation so PhoneRoll can remember each rolling position.");
       return;
     }
-    if (turnIndex === 4) {
-      const [first, second, third, fourth] = cornerSegments;
-      let next: number[] | null = null;
-      if (!reversed && first && third && fourth) {
-        const inferredSecond = (fourth + (third - first)) / 2;
-        if (inferredSecond > 8) next = [first, inferredSecond, first, inferredSecond];
-      }
-      if (reversed && first && second && fourth) {
-        const inferredThird = (first + (fourth - second)) / 2;
-        if (inferredThird > 8) next = [first, second, inferredThird, second];
-      }
-      if (!next) {
-        setCalibrationNotice("Align and save every non-skipped point before the final check.");
-        return;
-      }
-      setCalibration(next);
-      setCalibrationNotice("");
-      setCalibrationPhase("complete");
-      return;
-    }
-    const distanceMm = Math.abs(tapeOffset - lastAlignment) / rulerScale;
-    if (distanceMm < 8) {
-      setCalibrationNotice("Drag the tape to a new matching mark before saving this corner.");
-      return;
-    }
-    setCornerSegments((current) => current.map((value, index) => index === turnIndex ? distanceMm : value));
-    setLastAlignment(tapeOffset);
+    detector.current.stop();
     setCalibrationNotice("");
-    setTurnIndex(turnIndex + 1);
+    setCalibrationPhase("start");
+  };
+  const captureStart = () => {
+    const startOrientation = detectedOrientationRef.current;
+    if (startOrientation === "unknown") {
+      setCalibrationNotice("Hold the phone upright and still until its orientation appears below.");
+      return;
+    }
+    calibrationRuntime.current = { ...emptyRuntime(), lastAlignment: tapeOffset, orientationOrder: [startOrientation] };
+    setCalibrationTurns(0);
+    setPredictedDistance(null);
+    setCalibrationNotice("");
+    setCalibrationPhase("rolling");
+    detector.current.reset();
+  };
+  const saveAlignment = () => {
+    const runtime = calibrationRuntime.current;
+    if (!runtime.pending) {
+      setCalibrationNotice("Roll one quarter turn and wait for PhoneRoll to settle before saving.");
+      return;
+    }
+    const distanceMm = Math.abs(tapeOffset - runtime.lastAlignment) / rulerScale;
+    if (distanceMm < 8) {
+      setCalibrationNotice("Drag the tape to the new matching mark before saving this alignment.");
+      return;
+    }
+    const index = runtime.turnCount % 4;
+    runtime.draftValues[index] = distanceMm;
+    runtime.lastAlignment = tapeOffset;
+    runtime.turnCount += 1;
+    runtime.pending = null;
+    runtime.predictedMm = null;
+    setPredictedDistance(null);
+    setCalibrationTurns(runtime.turnCount);
+    setCalibrationNotice("");
+    detector.current.reset();
+  };
+  const finishCalibration = () => {
+    const runtime = calibrationRuntime.current;
+    if (!runtime.pending || runtime.predictedMm === null) {
+      setCalibrationNotice("Keep rolling until PhoneRoll predicts the next alignment, then confirm it is right.");
+      return;
+    }
+    const distanceMm = Math.abs(tapeOffset - runtime.lastAlignment) / rulerScale;
+    if (distanceMm < 8) {
+      setCalibrationNotice("The tape needs a new matching mark before it can be confirmed.");
+      return;
+    }
+    const index = runtime.turnCount % 4;
+    runtime.draftValues[index] = distanceMm;
+    const values = runtime.draftValues.map((value, itemIndex) => value ?? runtime.draftValues[itemIndex % 2] ?? 0);
+    if (values.some((value) => value <= 8) || runtime.orientationOrder.length !== 4) {
+      setCalibrationNotice("Keep rolling once more so PhoneRoll can identify every orientation.");
+      return;
+    }
+    setCalibration(values);
+    setCalibrationOrder(runtime.orientationOrder);
+    setCalibrationNotice("");
+    setCalibrationPhase("complete");
+    detector.current.stop();
   };
   const resetCalibration = () => {
     setCalibration([0, 0, 0, 0]);
+    setCalibrationOrder([]);
     setCalibrationPhase("scale");
-    setTurnIndex(0);
-    setCornerSegments([null, null, null, null]);
+    setCalibrationTurns(0);
+    setPredictedDistance(null);
+    calibrationRuntime.current = emptyRuntime();
     setCalibrationNotice("");
   };
-  const directionToggle = () => {
-    setReversed((current) => !current);
-    if (motionEnabledRef.current) detector.current.reset();
-  };
-
   const sharedTape = (draggable: boolean) => <TapeRuler
     offset={tapeOffset}
     scaleMm={rulerScale}
@@ -317,13 +418,14 @@ export default function Home() {
     draggable={draggable}
     showEnableHint={screen === "measure" && !motionEnabled}
     onOffset={setTapeOffset}
-    onReverse={directionToggle}
+    onDirection={chooseDirection}
+    onReset={resetTapeZero}
     onEnableMotion={screen === "measure" ? enableMotion : () => undefined}
   />;
 
   return <main className="app-shell">
     {screen === "measure" && <MeasureScreen menuOpen={menuOpen} onMenu={() => setMenuOpen((open) => !open)} onCalibrate={openCalibration} onSettings={openSettings}>{sharedTape(false)}</MeasureScreen>}
-    {screen === "calibration" && <CalibrationScreen phase={calibrationPhase} turnIndex={turnIndex} notice={calibrationNotice} rulerScale={rulerScale} reversed={reversed} onScale={(value) => setRulerScale(clamp(value, 2.5, 10))} onSaveScale={saveScale} onCaptureStart={captureStart} onSaveCorner={saveCorner} onBack={() => setScreen("measure")} onFinish={() => setScreen("measure")}>{sharedTape(true)}</CalibrationScreen>}
+    {screen === "calibration" && <CalibrationScreen phase={calibrationPhase} detectedOrientation={detectedOrientation} turns={calibrationTurns} predictedDistance={predictedDistance} notice={calibrationNotice} rulerScale={rulerScale} reversed={reversed} onScale={(value) => setRulerScale(clamp(value, 2.5, 10))} onSaveScale={saveScale} onCaptureStart={captureStart} onSaveAlignment={saveAlignment} onConfirmPrediction={finishCalibration} onBack={() => setScreen("measure")} onFinish={() => setScreen("measure")}>{sharedTape(true)}</CalibrationScreen>}
     {screen === "settings" && <SettingsScreen calibrated={calibration.every((value) => value > 0)} onReset={resetCalibration} onBack={() => setScreen("measure")} />}
   </main>;
 }
@@ -336,40 +438,34 @@ function MeasureScreen({ menuOpen, onMenu, onCalibrate, onSettings, children }: 
   </section>;
 }
 
-function CalibrationScreen({ phase, turnIndex, notice, rulerScale, reversed, onScale, onSaveScale, onCaptureStart, onSaveCorner, onBack, onFinish, children }: {
-  phase: CalibrationPhase; turnIndex: number; notice: string; rulerScale: number; reversed: boolean; onScale: (value: number) => void; onSaveScale: () => void; onCaptureStart: () => void; onSaveCorner: () => void; onBack: () => void; onFinish: () => void; children: ReactNode;
+function CalibrationScreen({ phase, detectedOrientation, turns, predictedDistance, notice, rulerScale, reversed, onScale, onSaveScale, onCaptureStart, onSaveAlignment, onConfirmPrediction, onBack, onFinish, children }: {
+  phase: CalibrationPhase; detectedOrientation: Orientation; turns: number; predictedDistance: number | null; notice: string; rulerScale: number; reversed: boolean; onScale: (value: number) => void; onSaveScale: () => void; onCaptureStart: () => void; onSaveAlignment: () => void; onConfirmPrediction: () => void; onBack: () => void; onFinish: () => void; children: ReactNode;
 }) {
-  const skippedPoint = reversed ? 2 : 1;
-  const isSkipped = turnIndex === skippedPoint;
-  const isClosingCheck = turnIndex === 4;
-  const actionText = isSkipped ? "Skip this corner" : isClosingCheck ? "Save alignment check" : "Save this corner";
-  const progress = <div className="corner-progress five-points" aria-label="Five point calibration progress">{Array.from({ length: 5 }, (_, index) => <span className={`${index < turnIndex ? "saved" : ""} ${index === skippedPoint ? "skip" : ""} ${index === turnIndex ? "active" : ""}`} key={index}>{index + 1}</span>)}</div>;
-  const turnsCopy = isSkipped
-    ? <><p className="step-count">Point {turnIndex + 1} of 5 · intentionally skipped</p><h1>Roll through this upside-down point.</h1><p>PhoneRoll will calculate this missing corner from the surrounding measurements. Roll one quarter turn, then tap Skip this corner and continue to the next point.</p></>
-    : isClosingCheck
-      ? <><p className="step-count">Point 5 of 5 · closing check</p><h1>Confirm the tape is still aligned.</h1><p>At the end of the loop, drag the tape to match your real ruler once more. This fifth point confirms the path is still aligned before PhoneRoll calculates the skipped corner.</p></>
-      : <><p className="step-count">Point {turnIndex + 1} of 5 · {reversed ? "moving left" : "moving right"}</p><h1>Flip once, then align the tape again.</h1><p>Roll the phone one quarter turn. Drag the yellow tape until its marks match the real ruler, then save this corner.</p></>;
+  const readyForFinish = predictedDistance !== null;
+  const status = phase === "rolling"
+    ? <div className="calibration-status"><span>Orientation</span><strong>{orientationName(detectedOrientation)}</strong>{predictedDistance !== null && <><span>Next estimate</span><strong>{(predictedDistance / 25.4).toFixed(3)} in</strong></>}</div>
+    : null;
   const steps = {
     scale: <><p className="step-count">Step 1 of 3</p><h1>Match the tape to a real tape measure.</h1><p>Adjust the scale until the inch and fraction marks on the yellow tape line up with your real tape. The slider only changes its physical size.</p><input className="scale-slider" aria-label="Tape scale" type="range" min="2.5" max="10" step="0.01" value={rulerScale} onChange={(event) => onScale(Number(event.target.value))} /><button className="action-button" onClick={onSaveScale}>Save tape size</button></>,
-    start: <><p className="step-count">Step 2 of 3</p><h1>Set the starting alignment.</h1><p>Put any phone edge at the zero of a real ruler. Drag the yellow tape until a shared whole-inch mark lines up—2″ to 2″ is a good choice.</p><button className="action-button" onClick={onCaptureStart}>Save starting alignment</button></>,
-    turns: turnsCopy,
-    complete: <><p className="step-count">Calibration complete</p><h1>The tape is ready to roll.</h1><p>Four rolling distances were calculated from the available points. Return to the ruler, tap it once to allow motion, then roll the phone in the selected direction.</p><div className="corner-progress five-points">{Array.from({ length: 5 }, (_, index) => <span className="saved" key={index}>{index + 1}</span>)}</div><button className="action-button" onClick={onFinish}>Use the tape</button></>,
+    start: <><p className="step-count">Step 2 of 3</p><h1>Start upright with the left side at zero.</h1><p>Stand the phone upright on the real tape measure with its left side at the 0 mark. Drag the yellow tape so the same mark lines up, then lock this first orientation.</p><div className="orientation-readout"><span>Detected orientation</span><strong>{orientationName(detectedOrientation)}</strong></div><button className="action-button" onClick={onCaptureStart}>Lock starting alignment</button></>,
+    rolling: <><p className="step-count">Step 3 of 3 · roll, align, repeat</p><h1>{readyForFinish ? "Was the prediction right?" : "Roll once, then align the tape."}</h1><p>{readyForFinish ? "If the yellow tape is already on the right mark, finish calibration. Otherwise nudge it, save the corrected alignment, and keep rolling." : `Roll one quarter turn ${reversed ? "to the left" : "to the right"}. Drag the yellow tape to the real tape’s matching mark. After two saved rolls, PhoneRoll will predict the next one.`}</p>{status}</>,
+    complete: <><p className="step-count">Calibration complete</p><h1>The tape is ready to roll.</h1><p>PhoneRoll saved four orientation-aware rolling distances. Back on the ruler, use the left or right arrow to choose direction, or reset it to zero before measuring.</p><button className="action-button" onClick={onFinish}>Use the tape</button></>,
   };
-  return <section className="calibration-screen"><header className="page-header"><button onClick={onBack}>‹ Ruler</button><span>Calibration</span></header><div className="calibration-card">{steps[phase]}{notice && <p className="calibration-notice">{notice}</p>}</div>{phase === "turns" && <div className="calibration-float">{progress}<button className="action-button" onClick={onSaveCorner}>{actionText}</button></div>}{children}</section>;
+  return <section className="calibration-screen"><header className="page-header"><button onClick={onBack}>‹ Ruler</button><span>Calibration</span></header><div className="calibration-card">{steps[phase]}{notice && <p className="calibration-notice">{notice}</p>}</div>{phase === "rolling" && <div className="calibration-float"><div className="corner-progress continuous-progress" aria-label="Calibration roll progress">{Array.from({ length: 4 }, (_, index) => <span className={index < Math.min(turns, 4) ? "saved" : index === turns % 4 ? "active" : ""} key={index}>{index + 1}</span>)}</div><div className="alignment-actions"><button className="plain-button" onClick={onSaveAlignment}>Save alignment &amp; roll again</button>{readyForFinish && <button className="action-button" onClick={onConfirmPrediction}>Looks right — finish</button>}</div></div>}{children}</section>;
 }
 
 function SettingsScreen({ calibrated, onReset, onBack }: { calibrated: boolean; onReset: () => void; onBack: () => void }) {
   const [confirming, setConfirming] = useState(false);
-  return <section className="settings-screen"><header className="page-header"><button onClick={onBack}>‹ Ruler</button><span>Settings</span></header><div className="settings-card"><h1>Tape calibration</h1><p>{calibrated ? "Four corner measurements are saved on this device." : "No complete tape calibration is saved yet."}</p>{confirming ? <div className="reset-row"><button className="action-button danger" onClick={() => { onReset(); setConfirming(false); }}>Reset calibration</button><button className="plain-button" onClick={() => setConfirming(false)}>Cancel</button></div> : <button className="plain-button danger-text" onClick={() => setConfirming(true)}>Reset calibration</button>}</div></section>;
+  return <section className="settings-screen"><header className="page-header"><button onClick={onBack}>‹ Ruler</button><span>Settings</span></header><div className="settings-card"><h1>Tape calibration</h1><p>{calibrated ? "Four orientation-aware rolling distances are saved on this device." : "No complete tape calibration is saved yet."}</p>{confirming ? <div className="reset-row"><button className="action-button danger" onClick={() => { onReset(); setConfirming(false); }}>Reset calibration</button><button className="plain-button" onClick={() => setConfirming(false)}>Cancel</button></div> : <button className="plain-button danger-text" onClick={() => setConfirming(true)}>Reset calibration</button>}</div></section>;
 }
 
-function TapeRuler({ offset, scaleMm, reversed, draggable, showEnableHint, onOffset, onReverse, onEnableMotion }: { offset: number; scaleMm: number; reversed: boolean; draggable: boolean; showEnableHint: boolean; onOffset: (value: number) => void; onReverse: () => void; onEnableMotion: () => void }) {
+function TapeRuler({ offset, scaleMm, reversed, draggable, showEnableHint, onOffset, onDirection, onReset, onEnableMotion }: { offset: number; scaleMm: number; reversed: boolean; draggable: boolean; showEnableHint: boolean; onOffset: (value: number) => void; onDirection: (reversed: boolean) => void; onReset: () => void; onEnableMotion: () => void | Promise<boolean> }) {
   const drag = useRef<{ pointerId: number; startX: number; startOffset: number } | null>(null);
   const pixelsPerInch = scaleMm * 25.4;
   const direction = reversed ? -1 : 1;
   const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     if ((event.target as HTMLElement).closest("button")) return;
-    onEnableMotion();
+    void onEnableMotion();
     if (!draggable) return;
     drag.current = { pointerId: event.pointerId, startX: event.clientX, startOffset: offset };
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -382,7 +478,7 @@ function TapeRuler({ offset, scaleMm, reversed, draggable, showEnableHint, onOff
     if (drag.current?.pointerId === event.pointerId) drag.current = null;
   };
   return <aside className="tape-ruler" aria-label="Construction tape ruler">
-    <button className="direction-button" aria-label="Reverse ruler direction" onClick={onReverse}><span>{reversed ? "←" : "→"}</span></button>
+    <div className="tape-controls" aria-label="Ruler direction and zero controls"><button className={!reversed ? "selected" : ""} aria-label="Measure right" onClick={() => onDirection(false)}>→</button><button className="zero-button" onClick={onReset}>0</button><button className={reversed ? "selected" : ""} aria-label="Measure left" onClick={() => onDirection(true)}>←</button></div>
     <div className={`tape-viewport ${draggable ? "is-draggable" : ""}`} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}>
       {showEnableHint && <span className="motion-hint">Tap tape to enable rolling</span>}
       {TAPE_TICKS.map(({ division, inch, fraction }) => <TapeTick key={division} x={offset + direction * (division / 16) * pixelsPerInch} inch={inch} fraction={fraction} />)}
@@ -393,6 +489,5 @@ function TapeRuler({ offset, scaleMm, reversed, draggable, showEnableHint, onOff
 function TapeTick({ x, inch, fraction }: { x: number; inch: number; fraction: number }) {
   const kind = fraction === 0 ? "inch" : fraction % 8 === 0 ? "half" : fraction % 4 === 0 ? "quarter" : fraction % 2 === 0 ? "eighth" : "sixteenth";
   const fractionText: Record<number, string> = { 0: String(inch), 2: "⅛", 4: "¼", 6: "⅜", 8: "½", 10: "⅝", 12: "¾", 14: "⅞" };
-  const label = fractionText[fraction] ?? "";
-  return <div className={`tape-tick ${kind}`} style={{ left: x } as CSSProperties}><span>{label}</span></div>;
+  return <div className={`tape-tick ${kind}`} style={{ left: x } as CSSProperties}><span>{fractionText[fraction] ?? ""}</span></div>;
 }
