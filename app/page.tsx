@@ -12,6 +12,7 @@ type MotionSample = { gravity: Vec; acceleration: Vec; rotation: Vec; orientatio
 type ApplePermissionEvent = { requestPermission?: () => Promise<"granted" | "denied"> };
 type QuarterTurn = { from: Orientation; to: Orientation };
 type SavedCalibration = { values: number[]; orientationOrder: Orientation[] };
+type UserSettings = { units: "in" | "mm"; sound: boolean; haptics: boolean };
 type CalibrationRuntime = {
   lastAlignment: number;
   turnCount: number;
@@ -25,6 +26,7 @@ const STORE = {
   calibration: "phoneroll.tape-calibration.v3",
   legacyCalibration: "phoneroll.tape-calibration.v2",
   rulerScale: "phoneroll.ruler-scale.v1",
+  settings: "phoneroll.settings.v1",
 };
 const TAPE_INCHES = 60;
 const TAPE_TICKS = Array.from({ length: TAPE_INCHES * 16 + 1 }, (_, division) => ({
@@ -32,6 +34,12 @@ const TAPE_TICKS = Array.from({ length: TAPE_INCHES * 16 + 1 }, (_, division) =>
   inch: Math.floor(division / 16),
   fraction: division % 16,
 }));
+const METRIC_TICKS = Array.from({ length: 1501 }, (_, millimeter) => ({
+  millimeter,
+  centimeter: Math.floor(millimeter / 10),
+  remainder: millimeter % 10,
+}));
+const DEFAULT_SETTINGS: UserSettings = { units: "in", sound: false, haptics: true };
 
 const blank = (): Vec => ({ x: 0, y: 0, z: 0 });
 const magnitude = (v: Vec) => Math.hypot(v.x, v.y, v.z);
@@ -202,6 +210,7 @@ export default function Home() {
   const [rulerScale, setRulerScale] = useState(3.78);
   const [calibration, setCalibration] = useState<number[]>([0, 0, 0, 0]);
   const [calibrationOrder, setCalibrationOrder] = useState<Orientation[]>([]);
+  const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
   const [tapeOffset, setTapeOffset] = useState(18);
   const [reversed, setReversed] = useState(false);
   const [motionEnabled, setMotionEnabled] = useState(false);
@@ -221,13 +230,21 @@ export default function Home() {
   const calibrationPhaseRef = useRef(calibrationPhase);
   const detectedOrientationRef = useRef(detectedOrientation);
   const calibrationRuntime = useRef<CalibrationRuntime>(emptyRuntime());
+  const settingsRef = useRef(settings);
+  const audioContext = useRef<AudioContext | null>(null);
 
   useEffect(() => {
     const savedScale = Number(localStorage.getItem(STORE.rulerScale) ?? 3.78);
     const savedCalibration = readSavedCalibration();
+    const savedSettings = loadJSON<UserSettings>(STORE.settings, DEFAULT_SETTINGS);
     setRulerScale(clamp(Number.isFinite(savedScale) ? savedScale : 3.78, 2.5, 10));
     setCalibration(savedCalibration.values);
     setCalibrationOrder(savedCalibration.orientationOrder);
+    setSettings({
+      units: savedSettings.units === "mm" ? "mm" : "in",
+      sound: Boolean(savedSettings.sound),
+      haptics: savedSettings.haptics !== false,
+    });
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => undefined);
   }, []);
   useEffect(() => { calibrationRef.current = calibration; localStorage.setItem(STORE.calibration, JSON.stringify({ values: calibration, orientationOrder: calibrationOrderRef.current })); }, [calibration]);
@@ -238,6 +255,27 @@ export default function Home() {
   useEffect(() => { screenRef.current = screen; }, [screen]);
   useEffect(() => { calibrationPhaseRef.current = calibrationPhase; }, [calibrationPhase]);
   useEffect(() => { detectedOrientationRef.current = detectedOrientation; }, [detectedOrientation]);
+  useEffect(() => { settingsRef.current = settings; localStorage.setItem(STORE.settings, JSON.stringify(settings)); }, [settings]);
+
+  const confirmFlip = () => {
+    const feedback = settingsRef.current;
+    if (feedback.haptics && typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate(16);
+    if (!feedback.sound || !audioContext.current) return;
+    try {
+      const context = audioContext.current;
+      const oscillator = context.createOscillator();
+      const gain = context.createGain();
+      oscillator.type = "sine";
+      oscillator.frequency.value = 880;
+      gain.gain.setValueAtTime(0.055, context.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.001, context.currentTime + 0.07);
+      oscillator.connect(gain).connect(context.destination);
+      oscillator.start();
+      oscillator.stop(context.currentTime + 0.075);
+    } catch {
+      // Feedback is optional and should never interrupt measuring.
+    }
+  };
 
   useEffect(() => {
     const readMotion = (event: DeviceMotionEvent) => {
@@ -252,6 +290,7 @@ export default function Home() {
       }
       const turn = detector.current.update(sample);
       if (!turn) return;
+      confirmFlip();
 
       if (screenRef.current === "calibration" && calibrationPhaseRef.current === "rolling") {
         const runtime = calibrationRuntime.current;
@@ -286,7 +325,17 @@ export default function Home() {
   }, []);
 
   const enableMotion = async () => {
-    if (motionEnabledRef.current) return true;
+    const primeSound = () => {
+      if (!settingsRef.current.sound || typeof window === "undefined") return;
+      const AudioConstructor = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioConstructor) return;
+      audioContext.current ??= new AudioConstructor();
+      void audioContext.current.resume();
+    };
+    if (motionEnabledRef.current) {
+      primeSound();
+      return true;
+    }
     try {
       const motion = DeviceMotionEvent as unknown as ApplePermissionEvent;
       const orientation = DeviceOrientationEvent as unknown as ApplePermissionEvent;
@@ -298,6 +347,7 @@ export default function Home() {
       detector.current.reset();
       motionEnabledRef.current = true;
       setMotionEnabled(true);
+      primeSound();
       return true;
     } catch {
       return false;
@@ -414,6 +464,7 @@ export default function Home() {
   const sharedTape = (draggable: boolean) => <TapeRuler
     offset={tapeOffset}
     scaleMm={rulerScale}
+    units={settings.units}
     reversed={reversed}
     draggable={draggable}
     showEnableHint={screen === "measure" && !motionEnabled}
@@ -426,13 +477,13 @@ export default function Home() {
   return <main className="app-shell">
     {screen === "measure" && <MeasureScreen menuOpen={menuOpen} onMenu={() => setMenuOpen((open) => !open)} onCalibrate={openCalibration} onSettings={openSettings}>{sharedTape(false)}</MeasureScreen>}
     {screen === "calibration" && <CalibrationScreen phase={calibrationPhase} detectedOrientation={detectedOrientation} turns={calibrationTurns} predictedDistance={predictedDistance} notice={calibrationNotice} rulerScale={rulerScale} reversed={reversed} onScale={(value) => setRulerScale(clamp(value, 2.5, 10))} onSaveScale={saveScale} onCaptureStart={captureStart} onSaveAlignment={saveAlignment} onConfirmPrediction={finishCalibration} onBack={() => setScreen("measure")} onFinish={() => setScreen("measure")}>{sharedTape(true)}</CalibrationScreen>}
-    {screen === "settings" && <SettingsScreen calibrated={calibration.every((value) => value > 0)} onReset={resetCalibration} onBack={() => setScreen("measure")} />}
+    {screen === "settings" && <SettingsScreen calibrated={calibration.every((value) => value > 0)} settings={settings} onChangeSettings={setSettings} onReset={resetCalibration} onBack={() => setScreen("measure")} />}
   </main>;
 }
 
 function MeasureScreen({ menuOpen, onMenu, onCalibrate, onSettings, children }: { menuOpen: boolean; onMenu: () => void; onCalibrate: () => void; onSettings: () => void; children: ReactNode }) {
   return <section className="measure-screen">
-    <button className="home-menu-button" aria-label="Open ruler options" aria-expanded={menuOpen} onClick={onMenu}>•••</button>
+    <button className="home-menu-button" aria-label="Open settings and calibration" aria-expanded={menuOpen} onClick={onMenu}>⚙</button>
     {menuOpen && <div className="home-menu"><button onClick={onCalibrate}>Calibrate tape</button><button onClick={onSettings}>Settings</button></div>}
     {children}
   </section>;
@@ -454,14 +505,20 @@ function CalibrationScreen({ phase, detectedOrientation, turns, predictedDistanc
   return <section className="calibration-screen"><header className="page-header"><button onClick={onBack}>‹ Ruler</button><span>Calibration</span></header><div className="calibration-card">{steps[phase]}{notice && <p className="calibration-notice">{notice}</p>}</div>{phase === "rolling" && <div className="calibration-float"><div className="corner-progress continuous-progress" aria-label="Calibration roll progress">{Array.from({ length: 4 }, (_, index) => <span className={index < Math.min(turns, 4) ? "saved" : index === turns % 4 ? "active" : ""} key={index}>{index + 1}</span>)}</div><div className="alignment-actions"><button className="plain-button" onClick={onSaveAlignment}>Save alignment &amp; roll again</button>{readyForFinish && <button className="action-button" onClick={onConfirmPrediction}>Looks right — finish</button>}</div></div>}{children}</section>;
 }
 
-function SettingsScreen({ calibrated, onReset, onBack }: { calibrated: boolean; onReset: () => void; onBack: () => void }) {
+function SettingsScreen({ calibrated, settings, onChangeSettings, onReset, onBack }: { calibrated: boolean; settings: UserSettings; onChangeSettings: (settings: UserSettings) => void; onReset: () => void; onBack: () => void }) {
   const [confirming, setConfirming] = useState(false);
-  return <section className="settings-screen"><header className="page-header"><button onClick={onBack}>‹ Ruler</button><span>Settings</span></header><div className="settings-card"><h1>Tape calibration</h1><p>{calibrated ? "Four orientation-aware rolling distances are saved on this device." : "No complete tape calibration is saved yet."}</p>{confirming ? <div className="reset-row"><button className="action-button danger" onClick={() => { onReset(); setConfirming(false); }}>Reset calibration</button><button className="plain-button" onClick={() => setConfirming(false)}>Cancel</button></div> : <button className="plain-button danger-text" onClick={() => setConfirming(true)}>Reset calibration</button>}</div></section>;
+  const hapticsSupported = typeof navigator !== "undefined" && "vibrate" in navigator;
+  const setSetting = <K extends keyof UserSettings>(key: K, value: UserSettings[K]) => onChangeSettings({ ...settings, [key]: value });
+  return <section className="settings-screen"><header className="page-header"><button onClick={onBack}>‹ Ruler</button><span>Settings</span></header><div className="settings-card"><h1>Ruler settings</h1><div className="settings-group"><div className="setting-row"><div><strong>Ruler labels</strong><span>Choose inches or millimeters</span></div><div className="segmented-control"><button className={settings.units === "in" ? "selected" : ""} onClick={() => setSetting("units", "in")}>in</button><button className={settings.units === "mm" ? "selected" : ""} onClick={() => setSetting("units", "mm")}>mm</button></div></div><ToggleRow label="Roll sound" detail="A quiet click for accepted rolls" checked={settings.sound} onChange={(checked) => setSetting("sound", checked)} /><ToggleRow label="Haptic feedback" detail={hapticsSupported ? "A small pulse for accepted rolls" : "Not supported by this browser"} checked={settings.haptics} disabled={!hapticsSupported} onChange={(checked) => setSetting("haptics", checked)} /></div><div className="settings-group calibration-settings"><strong>Tape calibration</strong><p>{calibrated ? "Four orientation-aware rolling distances are saved on this device." : "No complete tape calibration is saved yet."}</p>{confirming ? <div className="reset-row"><button className="action-button danger" onClick={() => { onReset(); setConfirming(false); }}>Reset calibration</button><button className="plain-button" onClick={() => setConfirming(false)}>Cancel</button></div> : <button className="plain-button danger-text" onClick={() => setConfirming(true)}>Reset calibration</button>}</div></div></section>;
 }
 
-function TapeRuler({ offset, scaleMm, reversed, draggable, showEnableHint, onOffset, onDirection, onReset, onEnableMotion }: { offset: number; scaleMm: number; reversed: boolean; draggable: boolean; showEnableHint: boolean; onOffset: (value: number) => void; onDirection: (reversed: boolean) => void; onReset: () => void; onEnableMotion: () => void | Promise<boolean> }) {
+function ToggleRow({ label, detail, checked, disabled = false, onChange }: { label: string; detail: string; checked: boolean; disabled?: boolean; onChange: (checked: boolean) => void }) {
+  return <div className={`setting-row ${disabled ? "disabled" : ""}`}><div><strong>{label}</strong><span>{detail}</span></div><button className={`switch ${checked ? "on" : ""}`} aria-label={label} aria-pressed={checked} disabled={disabled} onClick={() => onChange(!checked)}><span /></button></div>;
+}
+
+function TapeRuler({ offset, scaleMm, units, reversed, draggable, showEnableHint, onOffset, onDirection, onReset, onEnableMotion }: { offset: number; scaleMm: number; units: "in" | "mm"; reversed: boolean; draggable: boolean; showEnableHint: boolean; onOffset: (value: number) => void; onDirection: (reversed: boolean) => void; onReset: () => void; onEnableMotion: () => void | Promise<boolean> }) {
   const drag = useRef<{ pointerId: number; startX: number; startOffset: number } | null>(null);
-  const pixelsPerInch = scaleMm * 25.4;
+  const pixelsPerUnit = units === "in" ? scaleMm * 25.4 : scaleMm;
   const direction = reversed ? -1 : 1;
   const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     if ((event.target as HTMLElement).closest("button")) return;
@@ -477,11 +534,13 @@ function TapeRuler({ offset, scaleMm, reversed, draggable, showEnableHint, onOff
   const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (drag.current?.pointerId === event.pointerId) drag.current = null;
   };
-  return <aside className="tape-ruler" aria-label="Construction tape ruler">
+  return <aside className={`tape-ruler ${showEnableHint ? "is-inactive" : ""}`} aria-label="Construction tape ruler">
     <div className="tape-controls" aria-label="Ruler direction and zero controls"><button className={!reversed ? "selected" : ""} aria-label="Measure right" onClick={() => onDirection(false)}>→</button><button className="zero-button" onClick={onReset}>0</button><button className={reversed ? "selected" : ""} aria-label="Measure left" onClick={() => onDirection(true)}>←</button></div>
     <div className={`tape-viewport ${draggable ? "is-draggable" : ""}`} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}>
       {showEnableHint && <span className="motion-hint">Tap tape to enable rolling</span>}
-      {TAPE_TICKS.map(({ division, inch, fraction }) => <TapeTick key={division} x={offset + direction * (division / 16) * pixelsPerInch} inch={inch} fraction={fraction} />)}
+      {units === "in"
+        ? TAPE_TICKS.map(({ division, inch, fraction }) => <TapeTick key={division} x={offset + direction * (division / 16) * pixelsPerUnit} inch={inch} fraction={fraction} />)
+        : METRIC_TICKS.map(({ millimeter, centimeter, remainder }) => <MetricTick key={millimeter} x={offset + direction * millimeter * pixelsPerUnit} centimeter={centimeter} remainder={remainder} />)}
     </div>
   </aside>;
 }
@@ -490,4 +549,9 @@ function TapeTick({ x, inch, fraction }: { x: number; inch: number; fraction: nu
   const kind = fraction === 0 ? "inch" : fraction % 8 === 0 ? "half" : fraction % 4 === 0 ? "quarter" : fraction % 2 === 0 ? "eighth" : "sixteenth";
   const fractionText: Record<number, string> = { 0: String(inch), 2: "⅛", 4: "¼", 6: "⅜", 8: "½", 10: "⅝", 12: "¾", 14: "⅞" };
   return <div className={`tape-tick ${kind}`} style={{ left: x } as CSSProperties}><span>{fractionText[fraction] ?? ""}</span></div>;
+}
+
+function MetricTick({ x, centimeter, remainder }: { x: number; centimeter: number; remainder: number }) {
+  const kind = remainder === 0 ? "centimeter" : remainder === 5 ? "five-millimeter" : "millimeter";
+  return <div className={`tape-tick metric ${kind}`} style={{ left: x } as CSSProperties}><span>{remainder === 0 ? String(centimeter) : ""}</span></div>;
 }
