@@ -171,6 +171,7 @@ export default function Home() {
   const [motionEnabled, setMotionEnabled] = useState(false);
   const [calibrationPhase, setCalibrationPhase] = useState<CalibrationPhase>("scale");
   const [turnIndex, setTurnIndex] = useState(0);
+  const [cornerSegments, setCornerSegments] = useState<Array<number | null>>([null, null, null, null]);
   const [lastAlignment, setLastAlignment] = useState(0);
   const [calibrationNotice, setCalibrationNotice] = useState("");
 
@@ -247,30 +248,61 @@ export default function Home() {
     setMenuOpen(false);
     setCalibrationPhase("scale");
     setTurnIndex(0);
+    setCornerSegments([null, null, null, null]);
     setCalibrationNotice("");
     setScreen("calibration");
   };
   const openSettings = () => { detector.current.stop(); setMotionEnabled(false); setMenuOpen(false); setScreen("settings"); };
   const saveScale = () => { setCalibrationNotice(""); setCalibrationPhase("start"); };
-  const captureStart = () => { setLastAlignment(tapeOffset); setCalibrationNotice(""); setTurnIndex(0); setCalibrationPhase("turns"); };
+  const captureStart = () => {
+    setLastAlignment(tapeOffset);
+    setCornerSegments([null, null, null, null]);
+    setCalibrationNotice("");
+    setTurnIndex(0);
+    setCalibrationPhase("turns");
+  };
   const saveCorner = () => {
+    const skippedPoint = reversed ? 2 : 1;
+    if (turnIndex === skippedPoint) {
+      setCalibrationNotice("");
+      setTurnIndex(turnIndex + 1);
+      return;
+    }
+    if (turnIndex === 4) {
+      const [first, second, third, fourth] = cornerSegments;
+      let next: number[] | null = null;
+      if (!reversed && first && third && fourth) {
+        const inferredSecond = (fourth + (third - first)) / 2;
+        if (inferredSecond > 8) next = [first, inferredSecond, first, inferredSecond];
+      }
+      if (reversed && first && second && fourth) {
+        const inferredThird = (first + (fourth - second)) / 2;
+        if (inferredThird > 8) next = [first, second, inferredThird, second];
+      }
+      if (!next) {
+        setCalibrationNotice("Align and save every non-skipped point before the final check.");
+        return;
+      }
+      setCalibration(next);
+      setCalibrationNotice("");
+      setCalibrationPhase("complete");
+      return;
+    }
     const distanceMm = Math.abs(tapeOffset - lastAlignment) / rulerScale;
     if (distanceMm < 8) {
       setCalibrationNotice("Drag the tape to a new matching mark before saving this corner.");
       return;
     }
-    const next = [...calibration];
-    next[turnIndex] = distanceMm;
-    setCalibration(next);
+    setCornerSegments((current) => current.map((value, index) => index === turnIndex ? distanceMm : value));
     setLastAlignment(tapeOffset);
     setCalibrationNotice("");
-    if (turnIndex === 3) setCalibrationPhase("complete");
-    else setTurnIndex(turnIndex + 1);
+    setTurnIndex(turnIndex + 1);
   };
   const resetCalibration = () => {
     setCalibration([0, 0, 0, 0]);
     setCalibrationPhase("scale");
     setTurnIndex(0);
+    setCornerSegments([null, null, null, null]);
     setCalibrationNotice("");
   };
   const directionToggle = () => {
@@ -291,7 +323,7 @@ export default function Home() {
 
   return <main className="app-shell">
     {screen === "measure" && <MeasureScreen menuOpen={menuOpen} onMenu={() => setMenuOpen((open) => !open)} onCalibrate={openCalibration} onSettings={openSettings}>{sharedTape(false)}</MeasureScreen>}
-    {screen === "calibration" && <CalibrationScreen phase={calibrationPhase} turnIndex={turnIndex} notice={calibrationNotice} rulerScale={rulerScale} calibration={calibration} onScale={(value) => setRulerScale(clamp(value, 2.5, 10))} onSaveScale={saveScale} onCaptureStart={captureStart} onSaveCorner={saveCorner} onBack={() => setScreen("measure")} onFinish={() => setScreen("measure")}>{sharedTape(true)}</CalibrationScreen>}
+    {screen === "calibration" && <CalibrationScreen phase={calibrationPhase} turnIndex={turnIndex} notice={calibrationNotice} rulerScale={rulerScale} reversed={reversed} onScale={(value) => setRulerScale(clamp(value, 2.5, 10))} onSaveScale={saveScale} onCaptureStart={captureStart} onSaveCorner={saveCorner} onBack={() => setScreen("measure")} onFinish={() => setScreen("measure")}>{sharedTape(true)}</CalibrationScreen>}
     {screen === "settings" && <SettingsScreen calibrated={calibration.every((value) => value > 0)} onReset={resetCalibration} onBack={() => setScreen("measure")} />}
   </main>;
 }
@@ -304,16 +336,26 @@ function MeasureScreen({ menuOpen, onMenu, onCalibrate, onSettings, children }: 
   </section>;
 }
 
-function CalibrationScreen({ phase, turnIndex, notice, rulerScale, calibration, onScale, onSaveScale, onCaptureStart, onSaveCorner, onBack, onFinish, children }: {
-  phase: CalibrationPhase; turnIndex: number; notice: string; rulerScale: number; calibration: number[]; onScale: (value: number) => void; onSaveScale: () => void; onCaptureStart: () => void; onSaveCorner: () => void; onBack: () => void; onFinish: () => void; children: ReactNode;
+function CalibrationScreen({ phase, turnIndex, notice, rulerScale, reversed, onScale, onSaveScale, onCaptureStart, onSaveCorner, onBack, onFinish, children }: {
+  phase: CalibrationPhase; turnIndex: number; notice: string; rulerScale: number; reversed: boolean; onScale: (value: number) => void; onSaveScale: () => void; onCaptureStart: () => void; onSaveCorner: () => void; onBack: () => void; onFinish: () => void; children: ReactNode;
 }) {
+  const skippedPoint = reversed ? 2 : 1;
+  const isSkipped = turnIndex === skippedPoint;
+  const isClosingCheck = turnIndex === 4;
+  const actionText = isSkipped ? "Skip this corner" : isClosingCheck ? "Save alignment check" : "Save this corner";
+  const progress = <div className="corner-progress five-points" aria-label="Five point calibration progress">{Array.from({ length: 5 }, (_, index) => <span className={`${index < turnIndex ? "saved" : ""} ${index === skippedPoint ? "skip" : ""} ${index === turnIndex ? "active" : ""}`} key={index}>{index + 1}</span>)}</div>;
+  const turnsCopy = isSkipped
+    ? <><p className="step-count">Point {turnIndex + 1} of 5 · intentionally skipped</p><h1>Roll through this upside-down point.</h1><p>PhoneRoll will calculate this missing corner from the surrounding measurements. Roll one quarter turn, then tap Skip this corner and continue to the next point.</p></>
+    : isClosingCheck
+      ? <><p className="step-count">Point 5 of 5 · closing check</p><h1>Confirm the tape is still aligned.</h1><p>At the end of the loop, drag the tape to match your real ruler once more. This fifth point confirms the path is still aligned before PhoneRoll calculates the skipped corner.</p></>
+      : <><p className="step-count">Point {turnIndex + 1} of 5 · {reversed ? "moving left" : "moving right"}</p><h1>Flip once, then align the tape again.</h1><p>Roll the phone one quarter turn. Drag the yellow tape until its marks match the real ruler, then save this corner.</p></>;
   const steps = {
     scale: <><p className="step-count">Step 1 of 3</p><h1>Match the tape to a real tape measure.</h1><p>Adjust the scale until the inch and fraction marks on the yellow tape line up with your real tape. The slider only changes its physical size.</p><input className="scale-slider" aria-label="Tape scale" type="range" min="2.5" max="10" step="0.01" value={rulerScale} onChange={(event) => onScale(Number(event.target.value))} /><button className="action-button" onClick={onSaveScale}>Save tape size</button></>,
     start: <><p className="step-count">Step 2 of 3</p><h1>Set the starting alignment.</h1><p>Put any phone edge at the zero of a real ruler. Drag the yellow tape until a shared whole-inch mark lines up—2″ to 2″ is a good choice.</p><button className="action-button" onClick={onCaptureStart}>Save starting alignment</button></>,
-    turns: <><p className="step-count">Step 3 of 3 · corner {turnIndex + 1} of 4</p><h1>Flip once, then align the tape again.</h1><p>Roll the phone one quarter turn. Drag the yellow tape until its marks match the real ruler again, then save this corner. Repeat for all four corners.</p><div className="corner-progress">{calibration.map((value, index) => <span className={index < turnIndex || (phase === "complete" && value > 0) ? "saved" : ""} key={index}>{index + 1}</span>)}</div><button className="action-button" onClick={onSaveCorner}>Save this corner</button></>,
-    complete: <><p className="step-count">Calibration complete</p><h1>The tape is ready to roll.</h1><p>All four corner distances are saved. Return to the ruler, tap it once to allow motion, then roll the phone in the selected direction.</p><div className="corner-progress">{calibration.map((_, index) => <span className="saved" key={index}>{index + 1}</span>)}</div><button className="action-button" onClick={onFinish}>Use the tape</button></>,
+    turns: turnsCopy,
+    complete: <><p className="step-count">Calibration complete</p><h1>The tape is ready to roll.</h1><p>Four rolling distances were calculated from the available points. Return to the ruler, tap it once to allow motion, then roll the phone in the selected direction.</p><div className="corner-progress five-points">{Array.from({ length: 5 }, (_, index) => <span className="saved" key={index}>{index + 1}</span>)}</div><button className="action-button" onClick={onFinish}>Use the tape</button></>,
   };
-  return <section className="calibration-screen"><header className="page-header"><button onClick={onBack}>‹ Ruler</button><span>Calibration</span></header><div className="calibration-card">{steps[phase]}{notice && <p className="calibration-notice">{notice}</p>}</div>{children}</section>;
+  return <section className="calibration-screen"><header className="page-header"><button onClick={onBack}>‹ Ruler</button><span>Calibration</span></header><div className="calibration-card">{steps[phase]}{notice && <p className="calibration-notice">{notice}</p>}</div>{phase === "turns" && <div className="calibration-float">{progress}<button className="action-button" onClick={onSaveCorner}>{actionText}</button></div>}{children}</section>;
 }
 
 function SettingsScreen({ calibrated, onReset, onBack }: { calibrated: boolean; onReset: () => void; onBack: () => void }) {
