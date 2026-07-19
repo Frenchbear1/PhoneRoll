@@ -11,7 +11,7 @@ type Vec = { x: number; y: number; z: number };
 type MotionSample = { gravity: Vec; acceleration: Vec; rotation: Vec; orientation: Orientation; gravityMagnitude: number; at: number };
 type ApplePermissionEvent = { requestPermission?: () => Promise<"granted" | "denied"> };
 type QuarterTurn = { from: Orientation; to: Orientation };
-type SavedCalibration = { values: number[]; orientationOrder: Orientation[]; zeroOffset: number };
+type SavedCalibration = { values: number[]; orientationOrder: Orientation[]; zeroOffset: number | null };
 type UserSettings = { units: "in" | "mm"; sound: boolean; haptics: boolean };
 type CalibrationRuntime = {
   lastAlignment: number;
@@ -90,11 +90,11 @@ const readSavedCalibration = (): SavedCalibration => {
     return {
       values: Array.isArray(value.values) && value.values.length === 4 ? value.values : [0, 0, 0, 0],
       orientationOrder: Array.isArray(value.orientationOrder) ? value.orientationOrder.slice(0, 4) : [],
-      zeroOffset: Number.isFinite(value.zeroOffset) ? value.zeroOffset : 18,
+      zeroOffset: Number.isFinite(value.zeroOffset) ? value.zeroOffset : null,
     };
   }
   const legacy = loadJSON<number[]>(STORE.legacyCalibration, [0, 0, 0, 0]);
-  return { values: legacy.length === 4 ? legacy : [0, 0, 0, 0], orientationOrder: [], zeroOffset: 18 };
+  return { values: legacy.length === 4 ? legacy : [0, 0, 0, 0], orientationOrder: [], zeroOffset: null };
 };
 
 /** Accepts only a settled 90° roll and keeps opposite-direction movements out. */
@@ -211,9 +211,9 @@ export default function Home() {
   const [rulerScale, setRulerScale] = useState(3.78);
   const [calibration, setCalibration] = useState<number[]>([0, 0, 0, 0]);
   const [calibrationOrder, setCalibrationOrder] = useState<Orientation[]>([]);
-  const [zeroAlignment, setZeroAlignment] = useState(18);
+  const [zeroAlignment, setZeroAlignment] = useState<number | null>(null);
   const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
-  const [tapeOffset, setTapeOffset] = useState(18);
+  const [tapeOffset, setTapeOffset] = useState(-2);
   const [reversed, setReversed] = useState(false);
   const [motionEnabled, setMotionEnabled] = useState(false);
   const [calibrationPhase, setCalibrationPhase] = useState<CalibrationPhase>("scale");
@@ -367,7 +367,9 @@ export default function Home() {
   };
 
   const resetTapeZero = () => {
-    setTapeOffset(zeroAlignmentRef.current);
+    const startingEdge = zeroAlignmentRef.current ?? -2;
+    const screenWidth = typeof window === "undefined" ? 390 : window.innerWidth;
+    setTapeOffset(reversedRef.current ? screenWidth - startingEdge : startingEdge);
   };
   const chooseDirection = (nextReversed: boolean) => {
     setReversed(nextReversed);
@@ -469,7 +471,7 @@ export default function Home() {
   const resetCalibration = () => {
     setCalibration([0, 0, 0, 0]);
     setCalibrationOrder([]);
-    setZeroAlignment(18);
+    setZeroAlignment(null);
     setCalibrationPhase("scale");
     setCalibrationTurns(0);
     setPredictedDistance(null);
@@ -567,7 +569,7 @@ function TapeRuler({ offset, scaleMm, units, reversed, draggable, showEnableHint
 function TapeTick({ x, inch, fraction }: { x: number; inch: number; fraction: number }) {
   const kind = fraction === 0 ? "inch" : fraction % 8 === 0 ? "half" : fraction % 4 === 0 ? "quarter" : fraction % 2 === 0 ? "eighth" : "sixteenth";
   const fractionText: Record<number, string> = { 0: String(inch), 2: "⅛", 4: "¼", 6: "⅜", 8: "½", 10: "⅝", 12: "¾", 14: "⅞" };
-  return <div className={`tape-tick ${kind}`} style={{ left: x } as CSSProperties}><span>{fractionText[fraction] ?? ""}</span></div>;
+  return <div className={`tape-tick ${kind} ${inch === 0 && fraction === 0 ? "zero-tick" : ""}`} style={{ left: x } as CSSProperties}><span>{fractionText[fraction] ?? ""}</span></div>;
 }
 
 function MetricTick({ x, centimeter, remainder }: { x: number; centimeter: number; remainder: number }) {
