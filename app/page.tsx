@@ -13,7 +13,7 @@ type MotionSample = { gravity: Vec; acceleration: Vec; rotation: Vec; orientatio
 type ApplePermissionEvent = { requestPermission?: () => Promise<"granted" | "denied"> };
 type QuarterTurn = { from: Orientation; to: Orientation };
 type SavedCalibration = { values: number[]; orientationOrder: Orientation[]; zeroOffset: number | null };
-type UserSettings = { units: "in" | "mm"; sound: boolean; haptics: boolean };
+type UserSettings = { units: "in" | "mm"; sound: boolean };
 type PrecisionReading = { x: number; y: number; edge: TapeEdge; valueMm: number; label: string };
 type MemoryEntry = { id: string; parts: string[]; savedAt: number };
 type CalibrationRuntime = {
@@ -45,7 +45,7 @@ const METRIC_TICKS = Array.from({ length: 1501 }, (_, millimeter) => ({
   centimeter: Math.floor(millimeter / 10),
   remainder: millimeter % 10,
 }));
-const DEFAULT_SETTINGS: UserSettings = { units: "in", sound: false, haptics: true };
+const DEFAULT_SETTINGS: UserSettings = { units: "in", sound: false };
 
 const blank = (): Vec => ({ x: 0, y: 0, z: 0 });
 const magnitude = (v: Vec) => Math.hypot(v.x, v.y, v.z);
@@ -299,7 +299,6 @@ export default function Home() {
     setSettings({
       units: savedSettings.units === "mm" ? "mm" : "in",
       sound: Boolean(savedSettings.sound),
-      haptics: savedSettings.haptics !== false,
     });
     setMemoryEntries(Array.isArray(savedMemory) ? savedMemory.filter((entry) => entry && Array.isArray(entry.parts)) : []);
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => undefined);
@@ -319,12 +318,20 @@ export default function Home() {
   useEffect(() => { precisionFrozenRef.current = precisionFrozen; }, [precisionFrozen]);
   useEffect(() => { localStorage.setItem(STORE.memory, JSON.stringify(memoryEntries)); }, [memoryEntries]);
 
+  const primeSound = () => {
+    if (!settingsRef.current.sound || typeof window === "undefined") return null;
+    const AudioConstructor = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioConstructor) return null;
+    audioContext.current ??= new AudioConstructor();
+    void audioContext.current.resume();
+    return audioContext.current;
+  };
+
   const confirmFlip = () => {
-    const feedback = settingsRef.current;
-    if (feedback.haptics && typeof navigator !== "undefined" && "vibrate" in navigator) navigator.vibrate(16);
-    if (!feedback.sound || !audioContext.current) return;
+    if (!settingsRef.current.sound) return;
     try {
-      const context = audioContext.current;
+      const context = primeSound();
+      if (!context) return;
       const oscillator = context.createOscillator();
       const gain = context.createGain();
       oscillator.type = "sine";
@@ -403,13 +410,6 @@ export default function Home() {
   }, []);
 
   const enableMotion = async () => {
-    const primeSound = () => {
-      if (!settingsRef.current.sound || typeof window === "undefined") return;
-      const AudioConstructor = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-      if (!AudioConstructor) return;
-      audioContext.current ??= new AudioConstructor();
-      void audioContext.current.resume();
-    };
     if (motionEnabledRef.current) {
       primeSound();
       setMotionNotice(calibrationRef.current.some((value) => value <= 0) ? "Motion is on. Calibrate the tape before it can measure." : "Rolling is on.");
@@ -446,6 +446,12 @@ export default function Home() {
     setPrecisionFrozen(false);
     setDraftMeasurements([]);
   };
+  const dismissPrecisionReading = () => {
+    precisionReadingRef.current = null;
+    precisionFrozenRef.current = false;
+    setPrecisionReading(null);
+    setPrecisionFrozen(false);
+  };
   const readingCoordinate = (clientX: number, clientY: number, edge: TapeEdge) => {
     const span = tapeSpanForEdge(edge);
     if (edge === "top") return span - clientX;
@@ -454,14 +460,15 @@ export default function Home() {
     return clientX;
   };
   const capturePrecisionReading = (clientX: number, clientY: number) => {
-    if (precisionFrozenRef.current) return;
     const edge = tapeEdgeForOrientation(detectedOrientationRef.current);
     const direction = reversedRef.current ? -1 : 1;
     const coordinate = readingCoordinate(clientX, clientY, edge);
     const valueMm = Math.max(0, ((coordinate - tapeOffsetRef.current) / direction) / rulerScaleRef.current);
     const reading = { x: clientX, y: clientY, edge, valueMm, label: formatMeasurement(valueMm, settingsRef.current.units) };
     precisionReadingRef.current = reading;
+    precisionFrozenRef.current = false;
     setPrecisionReading(reading);
+    setPrecisionFrozen(false);
   };
   const freezePrecisionReading = () => {
     if (!precisionReadingRef.current) return;
@@ -619,6 +626,12 @@ export default function Home() {
     calibrationRuntime.current = emptyRuntime();
     setCalibrationNotice("");
   };
+  const updateSettings = (nextSettings: UserSettings) => {
+    const soundWasOff = !settingsRef.current.sound;
+    settingsRef.current = nextSettings;
+    setSettings(nextSettings);
+    if (soundWasOff && nextSettings.sound) confirmFlip();
+  };
   const sharedTape = (draggable: boolean, edge: TapeEdge = "bottom", showControls = screen === "measure", tapeReversed = reversed) => <TapeRuler
     offset={tapeOffset}
     scaleMm={rulerScale}
@@ -638,46 +651,64 @@ export default function Home() {
   const measureEdge = tapeEdgeForOrientation(detectedOrientation);
 
   return <main className="app-shell" onPointerDownCapture={() => { void enableMotion(); }}>
-    {screen === "measure" && <MeasureScreen calibrated={calibration.every((value) => value > 0)} edge={measureEdge} motionEnabled={motionEnabled} motionNotice={motionNotice} precisionReading={precisionReading} draftMeasurements={draftMeasurements} onPrecisionPoint={capturePrecisionReading} onPrecisionFreeze={freezePrecisionReading} onSaveMeasurement={saveMemoryReading} onAddMeasurementPart={addMemoryPart} onEnableMotion={enableMotion} onCalibrate={openCalibration} onMemory={openMemory} onSettings={openSettings}>{sharedTape(false, measureEdge)}</MeasureScreen>}
+    {screen === "measure" && <MeasureScreen calibrated={calibration.every((value) => value > 0)} edge={measureEdge} motionEnabled={motionEnabled} motionNotice={motionNotice} precisionReading={precisionReading} precisionFrozen={precisionFrozen} draftMeasurements={draftMeasurements} onPrecisionPoint={capturePrecisionReading} onPrecisionFreeze={freezePrecisionReading} onPrecisionDismiss={dismissPrecisionReading} onSaveMeasurement={saveMemoryReading} onAddMeasurementPart={addMemoryPart} onEnableMotion={enableMotion} onMemory={openMemory} onSettings={openSettings}>{sharedTape(false, measureEdge)}</MeasureScreen>}
     {screen === "calibration" && <CalibrationScreen phase={calibrationPhase} detectedOrientation={detectedOrientation} turns={calibrationTurns} notice={calibrationNotice} rulerScale={rulerScale} onScale={(value) => setRulerScale(clamp(value, 2.5, 10))} onSaveScale={saveScale} onCaptureStart={captureStart} onSaveAlignment={saveAlignment} onBack={goToMeasure} onFinish={goToMeasure}>{sharedTape(true, calibrationPhase === "rolling" ? tapeEdgeForOrientation(detectedOrientation) : "bottom", false, false)}</CalibrationScreen>}
-    {screen === "settings" && <SettingsScreen calibrated={calibration.every((value) => value > 0)} settings={settings} onChangeSettings={setSettings} onReset={resetCalibration} onBack={goToMeasure} />}
+    {screen === "settings" && <SettingsScreen calibrated={calibration.every((value) => value > 0)} settings={settings} onChangeSettings={updateSettings} onReset={resetCalibration} onCalibrate={openCalibration} onBack={goToMeasure} />}
     {screen === "memory" && <MemoryScreen entries={memoryEntries} onDelete={(ids) => setMemoryEntries((current) => current.filter((entry) => !ids.includes(entry.id)))} onBack={goToMeasure} />}
   </main>;
 }
 
-function MeasureScreen({ calibrated, edge, motionEnabled, motionNotice, precisionReading, draftMeasurements, onPrecisionPoint, onPrecisionFreeze, onSaveMeasurement, onAddMeasurementPart, onEnableMotion, onCalibrate, onMemory, onSettings, children }: {
+function MeasureScreen({ calibrated, edge, motionEnabled, motionNotice, precisionReading, precisionFrozen, draftMeasurements, onPrecisionPoint, onPrecisionFreeze, onPrecisionDismiss, onSaveMeasurement, onAddMeasurementPart, onEnableMotion, onMemory, onSettings, children }: {
   calibrated: boolean;
   edge: TapeEdge;
   motionEnabled: boolean;
   motionNotice: string;
   precisionReading: PrecisionReading | null;
+  precisionFrozen: boolean;
   draftMeasurements: string[];
   onPrecisionPoint: (clientX: number, clientY: number) => void;
   onPrecisionFreeze: () => void;
+  onPrecisionDismiss: () => void;
   onSaveMeasurement: () => void;
   onAddMeasurementPart: () => void;
   onEnableMotion: () => Promise<boolean>;
-  onCalibrate: () => void;
   onMemory: () => void;
   onSettings: () => void;
   children: ReactNode;
 }) {
-  const hold = useRef<number | null>(null);
-  const canMeasureFrom = (target: EventTarget | null) => target instanceof HTMLElement && !target.closest("button");
+  const hold = useRef<{ pointerId: number; startX: number; startY: number; measuring: boolean; timer: number | null; dismissOnTap: boolean } | null>(null);
+  const canMeasureFrom = (target: EventTarget | null) => target instanceof HTMLElement && !target.closest("button, .precision-readout");
   const startPreciseRead = (event: ReactPointerEvent<HTMLElement>) => {
     if (!canMeasureFrom(event.target)) return;
-    hold.current = event.pointerId;
     event.currentTarget.setPointerCapture(event.pointerId);
-    onPrecisionPoint(event.clientX, event.clientY);
+    const pointerId = event.pointerId;
+    const startX = event.clientX;
+    const startY = event.clientY;
+    const timer = window.setTimeout(() => {
+      if (hold.current?.pointerId !== pointerId || hold.current.measuring) return;
+      hold.current.measuring = true;
+      onPrecisionPoint(startX, startY);
+    }, 220);
+    hold.current = { pointerId, startX, startY, measuring: false, timer, dismissOnTap: Boolean(precisionReading && precisionFrozen) };
   };
   const movePreciseRead = (event: ReactPointerEvent<HTMLElement>) => {
-    if (hold.current !== event.pointerId) return;
+    if (!hold.current || hold.current.pointerId !== event.pointerId) return;
+    const moved = Math.hypot(event.clientX - hold.current.startX, event.clientY - hold.current.startY);
+    if (!hold.current.measuring && moved > 8) {
+      if (hold.current.timer) window.clearTimeout(hold.current.timer);
+      hold.current.measuring = true;
+    }
+    if (!hold.current.measuring) return;
     onPrecisionPoint(event.clientX, event.clientY);
   };
   const endPreciseRead = (event: ReactPointerEvent<HTMLElement>) => {
-    if (hold.current !== event.pointerId) return;
+    if (!hold.current || hold.current.pointerId !== event.pointerId) return;
+    if (hold.current.timer) window.clearTimeout(hold.current.timer);
+    const wasMeasuring = hold.current.measuring;
+    const dismissOnTap = hold.current.dismissOnTap;
     hold.current = null;
-    onPrecisionFreeze();
+    if (wasMeasuring) onPrecisionFreeze();
+    else if (dismissOnTap) onPrecisionDismiss();
   };
   const lineStyle = precisionReading ? (precisionReading.edge === "left" || precisionReading.edge === "right"
     ? { top: precisionReading.y } as CSSProperties
@@ -691,7 +722,6 @@ function MeasureScreen({ calibrated, edge, motionEnabled, motionNotice, precisio
         {motionNotice && !motionEnabled && <span className="rolling-warning">{motionNotice}</span>}
       </div>
       <div className="home-actions" aria-label="PhoneRoll controls">
-        <button className="home-icon-button calibrate-icon" aria-label="Calibrate tape" title="Calibrate tape" onClick={onCalibrate} />
         <button className="home-icon-button memory-icon" aria-label="Measurement memory" title="Measurement memory" onClick={onMemory} />
         <button className="home-icon-button settings-icon" aria-label="Settings" title="Settings" onClick={onSettings}>⚙</button>
       </div>
@@ -796,11 +826,10 @@ function MeasurementParts({ parts, compact = false }: { parts: string[]; compact
   return <>{parts.map((part, index) => <span className="memory-part" key={`${part}-${index}`}><MeasurementText label={part} compact={compact} />{index < parts.length - 1 && <em>x</em>}</span>)}</>;
 }
 
-function SettingsScreen({ calibrated, settings, onChangeSettings, onReset, onBack }: { calibrated: boolean; settings: UserSettings; onChangeSettings: (settings: UserSettings) => void; onReset: () => void; onBack: () => void }) {
+function SettingsScreen({ calibrated, settings, onChangeSettings, onReset, onCalibrate, onBack }: { calibrated: boolean; settings: UserSettings; onChangeSettings: (settings: UserSettings) => void; onReset: () => void; onCalibrate: () => void; onBack: () => void }) {
   const [confirming, setConfirming] = useState(false);
-  const hapticsSupported = typeof navigator !== "undefined" && "vibrate" in navigator;
   const setSetting = <K extends keyof UserSettings>(key: K, value: UserSettings[K]) => onChangeSettings({ ...settings, [key]: value });
-  return <section className="settings-screen"><header className="page-header"><button onClick={onBack}>‹ Ruler</button><span>Settings</span></header><div className="settings-card"><h1>Ruler settings</h1><div className="settings-group"><div className="setting-row"><div><strong>Ruler labels</strong><span>Choose inches or millimeters</span></div><div className="segmented-control"><button className={settings.units === "in" ? "selected" : ""} onClick={() => setSetting("units", "in")}>in</button><button className={settings.units === "mm" ? "selected" : ""} onClick={() => setSetting("units", "mm")}>mm</button></div></div><ToggleRow label="Roll sound" detail="A quiet click for accepted rolls" checked={settings.sound} onChange={(checked) => setSetting("sound", checked)} /><ToggleRow label="Haptic feedback" detail={hapticsSupported ? "A small pulse for accepted rolls" : "Not supported by this browser"} checked={settings.haptics} disabled={!hapticsSupported} onChange={(checked) => setSetting("haptics", checked)} /></div><div className="settings-group calibration-settings"><strong>Tape calibration</strong><p>{calibrated ? "Four orientation-aware rolling distances are saved on this device." : "No complete tape calibration is saved yet."}</p>{confirming ? <div className="reset-row"><button className="action-button danger" onClick={() => { onReset(); setConfirming(false); }}>Reset calibration</button><button className="plain-button" onClick={() => setConfirming(false)}>Cancel</button></div> : <button className="plain-button danger-text" onClick={() => setConfirming(true)}>Reset calibration</button>}</div></div></section>;
+  return <section className="settings-screen"><header className="page-header"><button onClick={onBack}>‹ Ruler</button><span>Settings</span></header><div className="settings-card"><h1>Ruler settings</h1><div className="settings-group"><div className="setting-row"><div><strong>Ruler labels</strong><span>Choose inches or millimeters</span></div><div className="segmented-control"><button className={settings.units === "in" ? "selected" : ""} onClick={() => setSetting("units", "in")}>in</button><button className={settings.units === "mm" ? "selected" : ""} onClick={() => setSetting("units", "mm")}>mm</button></div></div><ToggleRow label="Roll sound" detail="Plays a test click when enabled" checked={settings.sound} onChange={(checked) => setSetting("sound", checked)} /></div><div className="settings-group calibration-settings"><strong>Tape calibration</strong><p>{calibrated ? "Four orientation-aware rolling distances are saved on this device." : "No complete tape calibration is saved yet."}</p><button className="action-button calibrate-settings-button" onClick={onCalibrate}>Calibrate tape</button>{confirming ? <div className="reset-row"><button className="action-button danger" onClick={() => { onReset(); setConfirming(false); }}>Reset calibration</button><button className="plain-button" onClick={() => setConfirming(false)}>Cancel</button></div> : <button className="plain-button danger-text" onClick={() => setConfirming(true)}>Reset calibration</button>}</div></div></section>;
 }
 
 function ToggleRow({ label, detail, checked, disabled = false, onChange }: { label: string; detail: string; checked: boolean; disabled?: boolean; onChange: (checked: boolean) => void }) {
