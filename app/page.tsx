@@ -75,7 +75,7 @@ const orientationName = (orientation: Orientation) => ({
   right_edge: "right edge",
   unknown: "waiting for orientation",
 }[orientation]);
-const tapeEdgeForOrientation = (orientation: Orientation): TapeEdge => ({ bottom_edge: "bottom", right_edge: "right", top_edge: "top", left_edge: "left", face_up: "bottom", face_down: "top", unknown: "bottom" }[orientation]);
+const tapeEdgeForOrientation = (orientation: Orientation): TapeEdge => ({ bottom_edge: "top", right_edge: "bottom", top_edge: "bottom", left_edge: "bottom", face_up: "bottom", face_down: "bottom", unknown: "bottom" }[orientation]);
 
 const loadJSON = <T,>(key: string, fallback: T): T => {
   try {
