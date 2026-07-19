@@ -8,9 +8,11 @@ type Orientation = "face_up" | "face_down" | "top_edge" | "bottom_edge" | "left_
 type TapeEdge = "bottom" | "right" | "top" | "left";
 type EngineState = "idle" | "arming" | "ready" | "moving" | "cooldown";
 type CalibrationPhase = "scale" | "start" | "rolling" | "complete";
+type ScreenLock = "portrait" | "landscape-clockwise" | "landscape-counterclockwise" | "upside-down";
 type Vec = { x: number; y: number; z: number };
 type MotionSample = { gravity: Vec; acceleration: Vec; rotation: Vec; orientation: Orientation; gravityMagnitude: number; at: number };
 type ApplePermissionEvent = { requestPermission?: () => Promise<"granted" | "denied"> };
+type LockableScreenOrientation = ScreenOrientation & { lock?: (orientation: string) => Promise<void> };
 type QuarterTurn = { from: Orientation; to: Orientation };
 type SavedCalibration = { values: number[]; orientationOrder: Orientation[]; zeroOffset: number | null };
 type UserSettings = { units: "in" | "mm"; sound: boolean; haptics: boolean };
@@ -76,6 +78,36 @@ const orientationName = (orientation: Orientation) => ({
   unknown: "waiting for orientation",
 }[orientation]);
 const tapeEdgeForOrientation = (orientation: Orientation): TapeEdge => ({ bottom_edge: "bottom", right_edge: "right", top_edge: "top", left_edge: "left", face_up: "bottom", face_down: "top", unknown: "bottom" }[orientation]);
+
+const readScreenLock = (): ScreenLock => {
+  if (typeof window === "undefined") return "portrait";
+  const legacyWindow = window as Window & { orientation?: number };
+  const rawAngle = typeof window.screen?.orientation?.angle === "number"
+    ? window.screen.orientation.angle
+    : typeof legacyWindow.orientation === "number"
+      ? legacyWindow.orientation
+      : 0;
+  const angle = ((Math.round(rawAngle / 90) * 90) % 360 + 360) % 360;
+  if (angle === 90) return "landscape-clockwise";
+  if (angle === 270) return "landscape-counterclockwise";
+  if (angle === 180) return "upside-down";
+  return window.innerWidth > window.innerHeight ? "landscape-clockwise" : "portrait";
+};
+
+const requestPortraitLock = async () => {
+  if (typeof window === "undefined") return;
+  const orientation = window.screen?.orientation as LockableScreenOrientation | undefined;
+  if (!orientation?.lock) return;
+  try {
+    await orientation.lock("portrait-primary");
+  } catch {
+    try {
+      await orientation.lock("portrait");
+    } catch {
+      // iOS often ignores browser orientation locks, so CSS keeps the UI upright too.
+    }
+  }
+};
 
 const loadJSON = <T,>(key: string, fallback: T): T => {
   try {
@@ -210,6 +242,7 @@ class QuarterTurnEngine {
 
 export default function Home() {
   const [screen, setScreen] = useState<Screen>("measure");
+  const [screenLock, setScreenLock] = useState<ScreenLock>("portrait");
   const [menuOpen, setMenuOpen] = useState(false);
   const [rulerScale, setRulerScale] = useState(3.78);
   const [calibration, setCalibration] = useState<number[]>([0, 0, 0, 0]);
@@ -254,8 +287,18 @@ export default function Home() {
       sound: Boolean(savedSettings.sound),
       haptics: savedSettings.haptics !== false,
     });
+    const syncScreenLock = () => setScreenLock(readScreenLock());
+    syncScreenLock();
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => undefined);
-    void screen.orientation?.lock?.("portrait").catch(() => undefined);
+    void requestPortraitLock();
+    window.addEventListener("resize", syncScreenLock);
+    window.addEventListener("orientationchange", syncScreenLock);
+    window.screen?.orientation?.addEventListener?.("change", syncScreenLock);
+    return () => {
+      window.removeEventListener("resize", syncScreenLock);
+      window.removeEventListener("orientationchange", syncScreenLock);
+      window.screen?.orientation?.removeEventListener?.("change", syncScreenLock);
+    };
   }, []);
   useEffect(() => { calibrationRef.current = calibration; localStorage.setItem(STORE.calibration, JSON.stringify({ values: calibration, orientationOrder: calibrationOrderRef.current, zeroOffset: zeroAlignmentRef.current })); }, [calibration]);
   useEffect(() => { calibrationOrderRef.current = calibrationOrder; localStorage.setItem(STORE.calibration, JSON.stringify({ values: calibrationRef.current, orientationOrder: calibrationOrder, zeroOffset: zeroAlignmentRef.current })); }, [calibrationOrder]);
@@ -316,6 +359,7 @@ export default function Home() {
   }, []);
 
   const enableMotion = async () => {
+    void requestPortraitLock();
     const primeSound = () => {
       if (!settingsRef.current.sound || typeof window === "undefined") return;
       const AudioConstructor = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -460,13 +504,14 @@ export default function Home() {
     calibrationRuntime.current = emptyRuntime();
     setCalibrationNotice("");
   };
-  const sharedTape = (draggable: boolean, edge: TapeEdge = "bottom") => <TapeRuler
+  const sharedTape = (draggable: boolean, edge: TapeEdge = "bottom", showControls = screen === "measure", tapeReversed = reversed) => <TapeRuler
     offset={tapeOffset}
     scaleMm={rulerScale}
     units={settings.units}
     edge={edge}
-    reversed={reversed}
+    reversed={tapeReversed}
     draggable={draggable}
+    showControls={showControls}
     showEnableHint={false}
     motionNotice=""
     onOffset={setTapeOffset}
@@ -475,9 +520,9 @@ export default function Home() {
     onEnableMotion={screen === "measure" ? enableMotion : () => undefined}
   />;
 
-  return <main className="app-shell" onPointerDownCapture={() => { void enableMotion(); }}>
+  return <main className={`app-shell screen-lock-${screenLock}`} onPointerDownCapture={() => { void enableMotion(); }}>
     {screen === "measure" && <MeasureScreen calibrated={calibration.every((value) => value > 0)} menuOpen={menuOpen} onMenu={() => setMenuOpen((open) => !open)} onCalibrate={openCalibration} onSettings={openSettings}>{sharedTape(false)}</MeasureScreen>}
-    {screen === "calibration" && <CalibrationScreen phase={calibrationPhase} detectedOrientation={detectedOrientation} turns={calibrationTurns} notice={calibrationNotice} rulerScale={rulerScale} reversed={reversed} onScale={(value) => setRulerScale(clamp(value, 2.5, 10))} onSaveScale={saveScale} onCaptureStart={captureStart} onSaveAlignment={saveAlignment} onBack={() => setScreen("measure")} onFinish={() => setScreen("measure")}>{sharedTape(true, calibrationPhase === "rolling" ? tapeEdgeForOrientation(detectedOrientation) : "bottom")}</CalibrationScreen>}
+    {screen === "calibration" && <CalibrationScreen phase={calibrationPhase} detectedOrientation={detectedOrientation} turns={calibrationTurns} notice={calibrationNotice} rulerScale={rulerScale} onScale={(value) => setRulerScale(clamp(value, 2.5, 10))} onSaveScale={saveScale} onCaptureStart={captureStart} onSaveAlignment={saveAlignment} onBack={() => setScreen("measure")} onFinish={() => setScreen("measure")}>{sharedTape(true, calibrationPhase === "rolling" ? tapeEdgeForOrientation(detectedOrientation) : "bottom", false, false)}</CalibrationScreen>}
     {screen === "settings" && <SettingsScreen calibrated={calibration.every((value) => value > 0)} settings={settings} onChangeSettings={setSettings} onReset={resetCalibration} onBack={() => setScreen("measure")} />}
   </main>;
 }
@@ -509,15 +554,15 @@ function LegacyCalibrationScreen({ phase, detectedOrientation, turns, notice, ru
   return <section className="calibration-screen"><header className="page-header"><button onClick={onBack}>‹ Ruler</button><span>Calibration</span></header><div className="calibration-card">{steps[phase]}{notice && <p className="calibration-notice">{notice}</p>}</div>{phase === "rolling" && <div className="calibration-float"><div className="corner-progress continuous-progress" aria-label="Calibration roll progress">{Array.from({ length: 4 }, (_, index) => <span className={index < Math.min(turns, 4) ? "saved" : index === turns % 4 ? "active" : ""} key={index}>{index + 1}</span>)}</div><div className="alignment-actions"><button className="plain-button" onClick={onSaveAlignment}>Save alignment &amp; roll again</button>{readyForFinish && <button className="action-button" onClick={onConfirmPrediction}>Looks right — finish</button>}</div></div>}{children}</section>;
 }
 
-function CalibrationScreen({ phase, detectedOrientation, turns, notice, rulerScale, reversed, onScale, onSaveScale, onCaptureStart, onSaveAlignment, onBack, onFinish, children }: {
-  phase: CalibrationPhase; detectedOrientation: Orientation; turns: number; notice: string; rulerScale: number; reversed: boolean; onScale: (value: number) => void; onSaveScale: () => void; onCaptureStart: () => void; onSaveAlignment: () => void; onBack: () => void; onFinish: () => void; children: ReactNode;
+function CalibrationScreen({ phase, detectedOrientation, turns, notice, rulerScale, onScale, onSaveScale, onCaptureStart, onSaveAlignment, onBack, onFinish, children }: {
+  phase: CalibrationPhase; detectedOrientation: Orientation; turns: number; notice: string; rulerScale: number; onScale: (value: number) => void; onSaveScale: () => void; onCaptureStart: () => void; onSaveAlignment: () => void; onBack: () => void; onFinish: () => void; children: ReactNode;
 }) {
   const edge = tapeEdgeForOrientation(detectedOrientation);
   const rolling = phase === "rolling";
   const intro = {
     scale: <><p className="step-count">Step 1 of 3</p><h1>Match the tape to a real tape measure.</h1><p>Adjust the scale until the inch and fraction marks line up with your real tape.</p><input className="scale-slider" aria-label="Tape scale" type="range" min="2.5" max="10" step="0.01" value={rulerScale} onChange={(event) => onScale(Number(event.target.value))} /><button className="action-button" onClick={onSaveScale}>Save tape size</button></>,
     start: <><p className="step-count">Step 2 of 3</p><h1>Start upright with the left side at zero.</h1><p>Keep the phone upright. Align its left edge at 0 on the real ruler, align the yellow tape, then lock this starting position.</p><div className="orientation-readout"><span>Detected orientation</span><strong>{orientationName(detectedOrientation)}</strong></div><button className="action-button" onClick={onCaptureStart}>Lock starting alignment</button></>,
-    rolling: <><p className="step-count">Step 3 of 3 · side {Math.min(turns + 1, 4)} of 4</p><h1>Rotate, align, save.</h1><p>Rotate one quarter turn {reversed ? "to the left" : "to the right"}. The complete calibration view now turns with the detected phone edge.</p><div className="calibration-status"><span>Detected edge</span><strong>{orientationName(detectedOrientation)}</strong><span>Saved sides</span><strong>{turns} of 4</strong></div></>,
+    rolling: <><p className="step-count">Step 3 of 3 · side {Math.min(turns + 1, 4)} of 4</p><h1>Rotate, align, save.</h1><p>Rotate one quarter turn to the right. The complete calibration view turns with the detected phone edge.</p><div className="calibration-status"><span>Detected edge</span><strong>{orientationName(detectedOrientation)}</strong><span>Saved sides</span><strong>{turns} of 4</strong></div></>,
     complete: <><p className="step-count">Calibration complete</p><h1>The tape is ready to roll.</h1><p>All four orientation-aware side distances are saved.</p><button className="action-button" onClick={onFinish}>Use the tape</button></>,
   };
   return <section className={`calibration-screen calibration-orientation-${rolling ? edge : "bottom"}`}><div className="calibration-stage"><header className="page-header"><button onClick={onBack}>‹ Ruler</button><span>Calibration</span></header><div className="calibration-card">{intro[phase]}{notice && <p className="calibration-notice">{notice}</p>}</div>{rolling && <div className="calibration-float"><div className="alignment-actions"><button className="plain-button" onClick={onSaveAlignment}>Save alignment</button></div><div className="corner-progress continuous-progress" aria-label="Four-side calibration progress">{Array.from({ length: 4 }, (_, index) => <span className={index < turns ? "saved" : index === turns ? "active" : ""} key={index}>{index + 1}</span>)}</div></div>}</div>{children}</section>;
@@ -534,27 +579,33 @@ function ToggleRow({ label, detail, checked, disabled = false, onChange }: { lab
   return <div className={`setting-row ${disabled ? "disabled" : ""}`}><div><strong>{label}</strong><span>{detail}</span></div><button className={`switch ${checked ? "on" : ""}`} aria-label={label} aria-pressed={checked} disabled={disabled} onClick={() => onChange(!checked)}><span /></button></div>;
 }
 
-function TapeRuler({ offset, scaleMm, units, edge, reversed, draggable, showEnableHint, motionNotice, onOffset, onDirection, onReset, onEnableMotion }: { offset: number; scaleMm: number; units: "in" | "mm"; edge: TapeEdge; reversed: boolean; draggable: boolean; showEnableHint: boolean; motionNotice: string; onOffset: (value: number) => void; onDirection: (reversed: boolean) => void; onReset: () => void; onEnableMotion: () => void | Promise<boolean> }) {
-  const drag = useRef<{ pointerId: number; startX: number; startOffset: number } | null>(null);
+function TapeRuler({ offset, scaleMm, units, edge, reversed, draggable, showControls, showEnableHint, motionNotice, onOffset, onDirection, onReset, onEnableMotion }: { offset: number; scaleMm: number; units: "in" | "mm"; edge: TapeEdge; reversed: boolean; draggable: boolean; showControls: boolean; showEnableHint: boolean; motionNotice: string; onOffset: (value: number) => void; onDirection: (reversed: boolean) => void; onReset: () => void; onEnableMotion: () => void | Promise<boolean> }) {
+  const drag = useRef<{ pointerId: number; startCoordinate: number; startOffset: number; edge: TapeEdge } | null>(null);
   const pixelsPerUnit = units === "in" ? scaleMm * 25.4 : scaleMm;
   const direction = reversed ? -1 : 1;
+  const dragCoordinate = (event: ReactPointerEvent<HTMLDivElement>, tapeEdge: TapeEdge) => {
+    if (tapeEdge === "top") return -event.clientX;
+    if (tapeEdge === "right") return -event.clientY;
+    if (tapeEdge === "left") return event.clientY;
+    return event.clientX;
+  };
   const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     if ((event.target as HTMLElement).closest("button")) return;
     void onEnableMotion();
     if (!draggable) return;
-    drag.current = { pointerId: event.pointerId, startX: event.clientX, startOffset: offset };
+    drag.current = { pointerId: event.pointerId, startCoordinate: dragCoordinate(event, edge), startOffset: offset, edge };
     event.currentTarget.setPointerCapture(event.pointerId);
   };
   const moveDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (!drag.current || drag.current.pointerId !== event.pointerId) return;
-    onOffset(drag.current.startOffset + event.clientX - drag.current.startX);
+    onOffset(drag.current.startOffset + dragCoordinate(event, drag.current.edge) - drag.current.startCoordinate);
   };
   const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (drag.current?.pointerId === event.pointerId) drag.current = null;
   };
   const readiness = motionNotice;
   return <aside className={`tape-ruler edge-${edge} ${showEnableHint ? "is-inactive" : ""}`} aria-label="Construction tape ruler">
-    <div className="tape-controls" aria-label="Ruler direction and zero controls"><button className={!reversed ? "selected" : ""} aria-label="Measure right" onClick={() => onDirection(false)}>→</button><button className="zero-button" onClick={onReset}>0</button><button className={reversed ? "selected" : ""} aria-label="Measure left" onClick={() => onDirection(true)}>←</button></div>
+    {showControls && <div className="tape-controls" aria-label="Ruler direction and zero controls"><button className={!reversed ? "selected" : ""} aria-label="Measure right" onClick={() => onDirection(false)}>→</button><button className="zero-button" onClick={onReset}>0</button><button className={reversed ? "selected" : ""} aria-label="Measure left" onClick={() => onDirection(true)}>←</button></div>}
     <div className={`tape-viewport ${draggable ? "is-draggable" : ""}`} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}>
       {showEnableHint && <button className="motion-hint" onClick={() => void onEnableMotion()}>Tap to enable rolling</button>}
       {readiness && <span className="motion-status">{readiness}</span>}
