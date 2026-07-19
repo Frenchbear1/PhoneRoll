@@ -466,24 +466,24 @@ export default function Home() {
     edge={edge}
     reversed={reversed}
     draggable={draggable}
-    showEnableHint={screen === "measure" && !motionEnabled}
-    calibrationReady={calibration.every((value) => value > 0)}
-    motionNotice={screen === "measure" ? motionNotice : ""}
+    showEnableHint={false}
+    motionNotice=""
     onOffset={setTapeOffset}
     onDirection={chooseDirection}
     onReset={resetTapeZero}
     onEnableMotion={screen === "measure" ? enableMotion : () => undefined}
   />;
 
-  return <main className="app-shell">
-    {screen === "measure" && <MeasureScreen menuOpen={menuOpen} onMenu={() => setMenuOpen((open) => !open)} onCalibrate={openCalibration} onSettings={openSettings}>{sharedTape(false)}</MeasureScreen>}
+  return <main className="app-shell" onPointerDownCapture={() => { void enableMotion(); }}>
+    {screen === "measure" && <MeasureScreen calibrated={calibration.every((value) => value > 0)} menuOpen={menuOpen} onMenu={() => setMenuOpen((open) => !open)} onCalibrate={openCalibration} onSettings={openSettings}>{sharedTape(false)}</MeasureScreen>}
     {screen === "calibration" && <CalibrationScreen phase={calibrationPhase} detectedOrientation={detectedOrientation} turns={calibrationTurns} notice={calibrationNotice} rulerScale={rulerScale} reversed={reversed} onScale={(value) => setRulerScale(clamp(value, 2.5, 10))} onSaveScale={saveScale} onCaptureStart={captureStart} onSaveAlignment={saveAlignment} onBack={() => setScreen("measure")} onFinish={() => setScreen("measure")}>{sharedTape(true, tapeEdgeForOrientation(detectedOrientation))}</CalibrationScreen>}
     {screen === "settings" && <SettingsScreen calibrated={calibration.every((value) => value > 0)} settings={settings} onChangeSettings={setSettings} onReset={resetCalibration} onBack={() => setScreen("measure")} />}
   </main>;
 }
 
-function MeasureScreen({ menuOpen, onMenu, onCalibrate, onSettings, children }: { menuOpen: boolean; onMenu: () => void; onCalibrate: () => void; onSettings: () => void; children: ReactNode }) {
+function MeasureScreen({ calibrated, menuOpen, onMenu, onCalibrate, onSettings, children }: { calibrated: boolean; menuOpen: boolean; onMenu: () => void; onCalibrate: () => void; onSettings: () => void; children: ReactNode }) {
   return <section className="measure-screen">
+    <span className={`measure-status ${calibrated ? "ready" : "calibrate"}`}>{calibrated ? "Ready" : "Calibrate"}</span>
     <button className="home-menu-button" aria-label="Open settings and calibration" aria-expanded={menuOpen} onClick={onMenu}>⚙</button>
     {menuOpen && <div className="home-menu"><button onClick={onCalibrate}>Calibrate tape</button><button onClick={onSettings}>Settings</button></div>}
     {children}
@@ -519,7 +519,7 @@ function ToggleRow({ label, detail, checked, disabled = false, onChange }: { lab
   return <div className={`setting-row ${disabled ? "disabled" : ""}`}><div><strong>{label}</strong><span>{detail}</span></div><button className={`switch ${checked ? "on" : ""}`} aria-label={label} aria-pressed={checked} disabled={disabled} onClick={() => onChange(!checked)}><span /></button></div>;
 }
 
-function TapeRuler({ offset, scaleMm, units, edge, reversed, draggable, showEnableHint, calibrationReady, motionNotice, onOffset, onDirection, onReset, onEnableMotion }: { offset: number; scaleMm: number; units: "in" | "mm"; edge: TapeEdge; reversed: boolean; draggable: boolean; showEnableHint: boolean; calibrationReady: boolean; motionNotice: string; onOffset: (value: number) => void; onDirection: (reversed: boolean) => void; onReset: () => void; onEnableMotion: () => void | Promise<boolean> }) {
+function TapeRuler({ offset, scaleMm, units, edge, reversed, draggable, showEnableHint, motionNotice, onOffset, onDirection, onReset, onEnableMotion }: { offset: number; scaleMm: number; units: "in" | "mm"; edge: TapeEdge; reversed: boolean; draggable: boolean; showEnableHint: boolean; motionNotice: string; onOffset: (value: number) => void; onDirection: (reversed: boolean) => void; onReset: () => void; onEnableMotion: () => void | Promise<boolean> }) {
   const drag = useRef<{ pointerId: number; startX: number; startOffset: number } | null>(null);
   const pixelsPerUnit = units === "in" ? scaleMm * 25.4 : scaleMm;
   const direction = reversed ? -1 : 1;
@@ -537,7 +537,7 @@ function TapeRuler({ offset, scaleMm, units, edge, reversed, draggable, showEnab
   const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (drag.current?.pointerId === event.pointerId) drag.current = null;
   };
-  const readiness = motionNotice || (calibrationReady ? "" : "Calibration needed before rolling can measure.");
+  const readiness = motionNotice;
   return <aside className={`tape-ruler edge-${edge} ${showEnableHint ? "is-inactive" : ""}`} aria-label="Construction tape ruler">
     <div className="tape-controls" aria-label="Ruler direction and zero controls"><button className={!reversed ? "selected" : ""} aria-label="Measure right" onClick={() => onDirection(false)}>→</button><button className="zero-button" onClick={onReset}>0</button><button className={reversed ? "selected" : ""} aria-label="Measure left" onClick={() => onDirection(true)}>←</button></div>
     <div className={`tape-viewport ${draggable ? "is-draggable" : ""}`} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}>

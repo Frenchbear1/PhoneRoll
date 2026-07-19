@@ -6,7 +6,7 @@ html, body { min-height: 100%; margin: 0; background: #080909; }
 button, input { font: inherit; }
 button { cursor: pointer; }
 .app-shell { min-height: 100dvh; background: #080909; }
-.measure-screen { min-height: 100dvh; }
+.measure-screen { min-height: 100dvh; }.measure-status { position: fixed; top: max(20px, env(safe-area-inset-top)); left: 50%; z-index: 5; font-size: 12px; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; transform: translateX(-50%); }.measure-status.ready { color: #72d993; }.measure-status.calibrate { color: #e3be3d; }
 .home-menu-button { position: fixed; top: max(14px, env(safe-area-inset-top)); right: 15px; z-index: 5; display: grid; place-items: center; width: 42px; height: 42px; padding: 0; border: 1px solid #3a3d3e; border-radius: 50%; background: rgba(25,27,28,.94); color: #eeeede; box-shadow: 0 8px 22px rgba(0,0,0,.28); font-size: 19px; line-height: 1; }
 .home-menu { position: fixed; top: max(64px, calc(env(safe-area-inset-top) + 50px)); right: 15px; z-index: 5; display: grid; width: 170px; overflow: hidden; border: 1px solid #343738; border-radius: 13px; background: #191b1c; box-shadow: 0 16px 36px rgba(0,0,0,.45); }
 .home-menu button { padding: 14px 15px; border: 0; border-bottom: 1px solid #303233; background: transparent; color: #f0f0e8; text-align: left; font-size: 13px; }.home-menu button:last-child { border-bottom: 0; }
