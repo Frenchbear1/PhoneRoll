@@ -33,7 +33,6 @@ const STORE = {
   rulerScale: "phoneroll.ruler-scale.v1",
   settings: "phoneroll.settings.v1",
   memory: "phoneroll.measurement-memory.v1",
-  motionPermission: "phoneroll.motion-permission.v1",
 };
 const DEFAULT_SETTINGS: UserSettings = { units: "in", sound: false };
 const ROLL_CLICK_SRC = "data:audio/wav;base64,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";
@@ -137,6 +136,22 @@ const formatInches = (value: number) => {
 const formatMeasurement = (millimeters: number, units: UserSettings["units"]) => units === "mm"
   ? `${Math.max(0, Math.round(millimeters))} mm`
   : formatInches(millimeters / 25.4);
+const parseMeasurementLabel = (label: string) => {
+  const inch = label.match(/^(\d+)?(?:\s+)?(?:(\d+)\/(\d+))?\s+in$/);
+  if (inch) {
+    const [, whole, numerator, denominator] = inch;
+    const wholeValue = whole ? Number(whole) : 0;
+    const fractionValue = numerator && denominator ? Number(numerator) / Number(denominator) : 0;
+    return { valueMm: (wholeValue + fractionValue) * 25.4, units: "in" as const };
+  }
+  const metric = label.match(/^(\d+)\s+mm$/);
+  if (metric) return { valueMm: Number(metric[1]), units: "mm" as const };
+  return null;
+};
+const divideMeasurementLabel = (label: string, divisor: number) => {
+  const parsed = parseMeasurementLabel(label);
+  return parsed ? formatMeasurement(parsed.valueMm / divisor, parsed.units) : label;
+};
 
 const loadJSON = <T,>(key: string, fallback: T): T => {
   try {
@@ -286,6 +301,7 @@ export default function Home() {
   const [calibrationNotice, setCalibrationNotice] = useState("");
   const [motionNotice, setMotionNotice] = useState("");
   const [precisionReading, setPrecisionReading] = useState<PrecisionReading | null>(null);
+  const [precisionSecondReading, setPrecisionSecondReading] = useState<PrecisionReading | null>(null);
   const [precisionFrozen, setPrecisionFrozen] = useState(false);
   const [draftMeasurements, setDraftMeasurements] = useState<string[]>([]);
   const [memoryEntries, setMemoryEntries] = useState<MemoryEntry[]>([]);
@@ -303,22 +319,21 @@ export default function Home() {
   const detectedOrientationRef = useRef(detectedOrientation);
   const orientationStableSince = useRef(0);
   const motionSampleAt = useRef(0);
-  const sensorSeenAt = useRef(0);
   const homeRoll = useRef<HomeRollRuntime>({ orientation: "unknown", acceptedAt: 0 });
   const calibrationRuntime = useRef<CalibrationRuntime>(emptyRuntime());
   const settingsRef = useRef(settings);
   const precisionReadingRef = useRef<PrecisionReading | null>(null);
+  const precisionSecondReadingRef = useRef<PrecisionReading | null>(null);
   const precisionFrozenRef = useRef(false);
   const audioContext = useRef<AudioContext | null>(null);
   const rollAudio = useRef<HTMLAudioElement | null>(null);
 
-  const activateMotion = (remember: boolean) => {
+  const activateMotion = () => {
     detector.current.reset();
     homeRoll.current = { orientation: detectedOrientationRef.current, acceptedAt: performance.now() };
     motionEnabledRef.current = true;
     setMotionEnabled(true);
     setMotionNotice("");
-    if (remember) localStorage.setItem(STORE.motionPermission, "granted");
   };
 
   useEffect(() => {
@@ -340,16 +355,6 @@ export default function Home() {
     });
     setMemoryEntries(Array.isArray(savedMemory) ? savedMemory.filter((entry) => entry && Array.isArray(entry.parts)) : []);
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => undefined);
-    if (localStorage.getItem(STORE.motionPermission) === "granted") {
-      const startedAt = performance.now();
-      activateMotion(false);
-      window.setTimeout(() => {
-        if (!motionEnabledRef.current || sensorSeenAt.current >= startedAt) return;
-        motionEnabledRef.current = false;
-        setMotionEnabled(false);
-        setMotionNotice("Tap Enable rolling to refresh motion permission.");
-      }, 1800);
-    }
   }, []);
   useEffect(() => { calibrationRef.current = calibration; localStorage.setItem(STORE.calibration, JSON.stringify({ values: calibration, orientationOrder: calibrationOrderRef.current, zeroOffset: zeroAlignmentRef.current })); }, [calibration]);
   useEffect(() => { calibrationOrderRef.current = calibrationOrder; localStorage.setItem(STORE.calibration, JSON.stringify({ values: calibrationRef.current, orientationOrder: calibrationOrder, zeroOffset: zeroAlignmentRef.current })); }, [calibrationOrder]);
@@ -363,6 +368,7 @@ export default function Home() {
   useEffect(() => { detectedOrientationRef.current = detectedOrientation; }, [detectedOrientation]);
   useEffect(() => { settingsRef.current = settings; localStorage.setItem(STORE.settings, JSON.stringify(settings)); }, [settings]);
   useEffect(() => { precisionReadingRef.current = precisionReading; }, [precisionReading]);
+  useEffect(() => { precisionSecondReadingRef.current = precisionSecondReading; }, [precisionSecondReading]);
   useEffect(() => { precisionFrozenRef.current = precisionFrozen; }, [precisionFrozen]);
   useEffect(() => { localStorage.setItem(STORE.memory, JSON.stringify(memoryEntries)); }, [memoryEntries]);
 
@@ -477,14 +483,12 @@ export default function Home() {
       const rotation = event.rotationRate ? { x: safeNumber(event.rotationRate.alpha), y: safeNumber(event.rotationRate.beta), z: safeNumber(event.rotationRate.gamma) } : blank();
       const sample: MotionSample = { gravity, acceleration, rotation, orientation: orientationFromGravity(gravity), gravityMagnitude: magnitude(gravity), at: event.timeStamp || performance.now() };
       motionSampleAt.current = sample.at;
-      sensorSeenAt.current = sample.at;
       updateDetectedOrientation(sample.orientation, sample.at);
       if (!motionEnabledRef.current || (screenRef.current === "calibration" && calibrationPhaseRef.current === "rolling")) return;
       detector.current.update(sample);
     };
     const readOrientation = (event: DeviceOrientationEvent) => {
       const now = event.timeStamp || performance.now();
-      sensorSeenAt.current = now;
       if (now - motionSampleAt.current < 350) return;
       updateDetectedOrientation(orientationFromAngles(event.beta, event.gamma), now);
     };
@@ -514,16 +518,14 @@ export default function Home() {
       for (const event of requested) {
         const decision = await event.requestPermission?.();
         if (decision !== "granted") {
-          localStorage.removeItem(STORE.motionPermission);
           setMotionNotice("Motion permission was not enabled. Tap Enable rolling and choose Allow.");
           return false;
         }
       }
-      activateMotion(true);
+      activateMotion();
       primeSound(true);
       return true;
     } catch {
-      localStorage.removeItem(STORE.motionPermission);
       setMotionNotice("Motion permission was not enabled. Tap Enable rolling and choose Allow.");
       return false;
     }
@@ -531,15 +533,19 @@ export default function Home() {
 
   const clearPrecisionReading = () => {
     precisionReadingRef.current = null;
+    precisionSecondReadingRef.current = null;
     precisionFrozenRef.current = false;
     setPrecisionReading(null);
+    setPrecisionSecondReading(null);
     setPrecisionFrozen(false);
     setDraftMeasurements([]);
   };
   const dismissPrecisionReading = () => {
     precisionReadingRef.current = null;
+    precisionSecondReadingRef.current = null;
     precisionFrozenRef.current = false;
     setPrecisionReading(null);
+    setPrecisionSecondReading(null);
     setPrecisionFrozen(false);
   };
   const readingCoordinate = (clientX: number, clientY: number, edge: TapeEdge) => {
@@ -549,15 +555,31 @@ export default function Home() {
     if (edge === "left") return clientY;
     return clientX;
   };
-  const capturePrecisionReading = (clientX: number, clientY: number) => {
+  const currentPrecisionLabel = () => {
+    const first = precisionReadingRef.current;
+    if (!first) return null;
+    const second = precisionSecondReadingRef.current;
+    const valueMm = second ? Math.abs(second.valueMm - first.valueMm) : first.valueMm;
+    return formatMeasurement(valueMm, settingsRef.current.units);
+  };
+  const capturePrecisionReading = (clientX: number, clientY: number, slot = 0) => {
     const edge = tapeEdgeForOrientation(detectedOrientationRef.current);
     const direction = reversedRef.current ? -1 : 1;
     const coordinate = readingCoordinate(clientX, clientY, edge);
     const valueMm = Math.max(0, ((coordinate - tapeOffsetRef.current) / direction) / rulerScaleRef.current);
     const reading = { x: clientX, y: clientY, edge, valueMm, label: formatMeasurement(valueMm, settingsRef.current.units) };
-    precisionReadingRef.current = reading;
+    if (slot === 1 && precisionReadingRef.current) {
+      precisionSecondReadingRef.current = reading;
+      setPrecisionSecondReading(reading);
+    } else {
+      precisionReadingRef.current = reading;
+      if (precisionFrozenRef.current) {
+        precisionSecondReadingRef.current = null;
+        setPrecisionSecondReading(null);
+      }
+      setPrecisionReading(reading);
+    }
     precisionFrozenRef.current = false;
-    setPrecisionReading(reading);
     setPrecisionFrozen(false);
   };
   const freezePrecisionReading = () => {
@@ -566,18 +588,21 @@ export default function Home() {
     setPrecisionFrozen(true);
   };
   const saveMemoryReading = () => {
-    const parts = precisionReadingRef.current ? [...draftMeasurements, precisionReadingRef.current.label] : draftMeasurements;
+    const label = currentPrecisionLabel();
+    const parts = label ? [...draftMeasurements, label] : draftMeasurements;
     if (!parts.length) return;
     setMemoryEntries((current) => [{ id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`, parts, savedAt: Date.now() }, ...current]);
     clearPrecisionReading();
   };
   const addMemoryPart = () => {
-    const reading = precisionReadingRef.current;
-    if (!reading) return;
-    setDraftMeasurements((current) => [...current, reading.label]);
+    const label = currentPrecisionLabel();
+    if (!label) return;
+    setDraftMeasurements((current) => [...current, label]);
     precisionReadingRef.current = null;
+    precisionSecondReadingRef.current = null;
     precisionFrozenRef.current = false;
     setPrecisionReading(null);
+    setPrecisionSecondReading(null);
     setPrecisionFrozen(false);
   };
 
@@ -743,24 +768,31 @@ export default function Home() {
   />;
 
   const measureEdge = tapeEdgeForOrientation(detectedOrientation);
+  const precisionDisplayLabel = precisionReading
+    ? formatMeasurement(precisionSecondReading ? Math.abs(precisionSecondReading.valueMm - precisionReading.valueMm) : precisionReading.valueMm, settings.units)
+    : "";
+  const precisionIsDifference = Boolean(precisionReading && precisionSecondReading);
 
   return <main className="app-shell">
-    {screen === "measure" && <MeasureScreen calibrated={calibration.every((value) => value > 0)} edge={measureEdge} motionEnabled={motionEnabled} motionNotice={motionNotice} precisionReading={precisionReading} precisionFrozen={precisionFrozen} draftMeasurements={draftMeasurements} onPrecisionPoint={capturePrecisionReading} onPrecisionFreeze={freezePrecisionReading} onPrecisionDismiss={dismissPrecisionReading} onSaveMeasurement={saveMemoryReading} onAddMeasurementPart={addMemoryPart} onEnableMotion={enableMotion} onMemory={openMemory} onSettings={openSettings}>{sharedTape(false, measureEdge)}</MeasureScreen>}
+    {screen === "measure" && <MeasureScreen calibrated={calibration.every((value) => value > 0)} edge={measureEdge} motionEnabled={motionEnabled} motionNotice={motionNotice} precisionReading={precisionReading} precisionSecondReading={precisionSecondReading} precisionDisplayLabel={precisionDisplayLabel} precisionIsDifference={precisionIsDifference} precisionFrozen={precisionFrozen} draftMeasurements={draftMeasurements} onPrecisionPoint={capturePrecisionReading} onPrecisionFreeze={freezePrecisionReading} onPrecisionDismiss={dismissPrecisionReading} onSaveMeasurement={saveMemoryReading} onAddMeasurementPart={addMemoryPart} onEnableMotion={enableMotion} onMemory={openMemory} onSettings={openSettings}>{sharedTape(false, measureEdge)}</MeasureScreen>}
     {screen === "calibration" && <CalibrationScreen phase={calibrationPhase} detectedOrientation={detectedOrientation} turns={calibrationTurns} notice={calibrationNotice} rulerScale={rulerScale} onScale={(value) => setRulerScale(clamp(value, 2.5, 10))} onSaveScale={saveScale} onCaptureStart={captureStart} onSaveAlignment={saveAlignment} onBack={goToMeasure} onFinish={goToMeasure}>{sharedTape(true, calibrationPhase === "rolling" ? tapeEdgeForOrientation(detectedOrientation) : "bottom", false, false)}</CalibrationScreen>}
     {screen === "settings" && <SettingsScreen calibrated={calibration.every((value) => value > 0)} settings={settings} onChangeSettings={updateSettings} onReset={resetCalibration} onCalibrate={openCalibration} onBack={goToMeasure} />}
     {screen === "memory" && <MemoryScreen entries={memoryEntries} onDelete={(ids) => setMemoryEntries((current) => current.filter((entry) => !ids.includes(entry.id)))} onBack={goToMeasure} />}
   </main>;
 }
 
-function MeasureScreen({ calibrated, edge, motionEnabled, motionNotice, precisionReading, precisionFrozen, draftMeasurements, onPrecisionPoint, onPrecisionFreeze, onPrecisionDismiss, onSaveMeasurement, onAddMeasurementPart, onEnableMotion, onMemory, onSettings, children }: {
+function MeasureScreen({ calibrated, edge, motionEnabled, motionNotice, precisionReading, precisionSecondReading, precisionDisplayLabel, precisionIsDifference, precisionFrozen, draftMeasurements, onPrecisionPoint, onPrecisionFreeze, onPrecisionDismiss, onSaveMeasurement, onAddMeasurementPart, onEnableMotion, onMemory, onSettings, children }: {
   calibrated: boolean;
   edge: TapeEdge;
   motionEnabled: boolean;
   motionNotice: string;
   precisionReading: PrecisionReading | null;
+  precisionSecondReading: PrecisionReading | null;
+  precisionDisplayLabel: string;
+  precisionIsDifference: boolean;
   precisionFrozen: boolean;
   draftMeasurements: string[];
-  onPrecisionPoint: (clientX: number, clientY: number) => void;
+  onPrecisionPoint: (clientX: number, clientY: number, slot?: number) => void;
   onPrecisionFreeze: () => void;
   onPrecisionDismiss: () => void;
   onSaveMeasurement: () => void;
@@ -770,43 +802,49 @@ function MeasureScreen({ calibrated, edge, motionEnabled, motionNotice, precisio
   onSettings: () => void;
   children: ReactNode;
 }) {
-  const hold = useRef<{ pointerId: number; startX: number; startY: number; measuring: boolean; timer: number | null; dismissOnTap: boolean } | null>(null);
+  const holds = useRef<Map<number, { slot: number; startX: number; startY: number; measuring: boolean; timer: number | null; dismissOnTap: boolean }>>(new Map());
   const canMeasureFrom = (target: EventTarget | null) => target instanceof HTMLElement && !target.closest("button, .precision-readout");
   const startPreciseRead = (event: ReactPointerEvent<HTMLElement>) => {
     if (!canMeasureFrom(event.target)) return;
+    const usedSlots = new Set(Array.from(holds.current.values()).map((hold) => hold.slot));
+    if (usedSlots.has(0) && usedSlots.has(1)) return;
+    const slot = usedSlots.has(0) ? 1 : 0;
     event.currentTarget.setPointerCapture(event.pointerId);
     const pointerId = event.pointerId;
     const startX = event.clientX;
     const startY = event.clientY;
     const timer = window.setTimeout(() => {
-      if (hold.current?.pointerId !== pointerId || hold.current.measuring) return;
-      hold.current.measuring = true;
-      onPrecisionPoint(startX, startY);
+      const hold = holds.current.get(pointerId);
+      if (!hold || hold.measuring) return;
+      hold.measuring = true;
+      onPrecisionPoint(startX, startY, hold.slot);
     }, 220);
-    hold.current = { pointerId, startX, startY, measuring: false, timer, dismissOnTap: Boolean(precisionReading && precisionFrozen) };
+    holds.current.set(pointerId, { slot, startX, startY, measuring: false, timer, dismissOnTap: holds.current.size === 0 && Boolean(precisionReading && precisionFrozen) });
   };
   const movePreciseRead = (event: ReactPointerEvent<HTMLElement>) => {
-    if (!hold.current || hold.current.pointerId !== event.pointerId) return;
-    const moved = Math.hypot(event.clientX - hold.current.startX, event.clientY - hold.current.startY);
-    if (!hold.current.measuring && moved > 8) {
-      if (hold.current.timer) window.clearTimeout(hold.current.timer);
-      hold.current.measuring = true;
+    const hold = holds.current.get(event.pointerId);
+    if (!hold) return;
+    const moved = Math.hypot(event.clientX - hold.startX, event.clientY - hold.startY);
+    if (!hold.measuring && moved > 8) {
+      if (hold.timer) window.clearTimeout(hold.timer);
+      hold.measuring = true;
     }
-    if (!hold.current.measuring) return;
-    onPrecisionPoint(event.clientX, event.clientY);
+    if (!hold.measuring) return;
+    onPrecisionPoint(event.clientX, event.clientY, hold.slot);
   };
   const endPreciseRead = (event: ReactPointerEvent<HTMLElement>) => {
-    if (!hold.current || hold.current.pointerId !== event.pointerId) return;
-    if (hold.current.timer) window.clearTimeout(hold.current.timer);
-    const wasMeasuring = hold.current.measuring;
-    const dismissOnTap = hold.current.dismissOnTap;
-    hold.current = null;
+    const hold = holds.current.get(event.pointerId);
+    if (!hold) return;
+    if (hold.timer) window.clearTimeout(hold.timer);
+    const wasMeasuring = hold.measuring;
+    const dismissOnTap = hold.dismissOnTap;
+    holds.current.delete(event.pointerId);
     if (wasMeasuring) onPrecisionFreeze();
-    else if (dismissOnTap) onPrecisionDismiss();
+    else if (dismissOnTap && holds.current.size === 0) onPrecisionDismiss();
   };
-  const lineStyle = precisionReading ? (precisionReading.edge === "left" || precisionReading.edge === "right"
-    ? { top: precisionReading.y } as CSSProperties
-    : { left: precisionReading.x } as CSSProperties) : undefined;
+  const lineStyle = (reading: PrecisionReading) => (reading.edge === "left" || reading.edge === "right"
+    ? { top: reading.y } as CSSProperties
+    : { left: reading.x } as CSSProperties);
   return <section className={`measure-screen measure-orientation-${edge}`} onPointerDown={startPreciseRead} onPointerMove={movePreciseRead} onPointerUp={endPreciseRead} onPointerCancel={endPreciseRead}>
     <div className="measure-stage">
       <div className="home-status-cluster">
@@ -820,11 +858,13 @@ function MeasureScreen({ calibrated, edge, motionEnabled, motionNotice, precisio
         <button className="home-icon-button settings-icon" aria-label="Settings" title="Settings" onClick={onSettings}>⚙</button>
       </div>
     </div>
-    {precisionReading && <div className={`precision-line precision-line-${precisionReading.edge}`} style={lineStyle} aria-hidden="true" />}
+    {precisionReading && <div className={`precision-line precision-line-${precisionReading.edge}`} style={lineStyle(precisionReading)} aria-hidden="true" />}
+    {precisionSecondReading && <div className={`precision-line precision-line-secondary precision-line-${precisionSecondReading.edge}`} style={lineStyle(precisionSecondReading)} aria-hidden="true" />}
     {precisionReading && <div className={`precision-layer precision-layer-${edge}`}>
       <div className={`precision-readout ${draftMeasurements.length ? "has-pending" : ""}`} role="status" aria-live="polite">
         {draftMeasurements.length > 0 && <span className="precision-pending"><MeasurementParts parts={draftMeasurements} compact /><em>x</em></span>}
-        <strong><MeasurementText label={precisionReading.label} /></strong>
+        {precisionIsDifference && <span className="precision-mode-label">between lines</span>}
+        <strong><MeasurementText label={precisionDisplayLabel} /></strong>
         <div className="precision-actions">
           <button onClick={onAddMeasurementPart}>By</button>
           <button onClick={onSaveMeasurement}>Save</button>
@@ -870,6 +910,7 @@ function CalibrationScreen({ phase, detectedOrientation, turns, notice, rulerSca
 function MemoryScreen({ entries, onDelete, onBack }: { entries: MemoryEntry[]; onDelete: (ids: string[]) => void; onBack: () => void }) {
   const [selecting, setSelecting] = useState(false);
   const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const [splitDivisor, setSplitDivisor] = useState(0);
   const allSelected = entries.length > 0 && selectedIds.length === entries.length;
   const leaveSelection = () => {
     setSelecting(false);
@@ -893,11 +934,14 @@ function MemoryScreen({ entries, onDelete, onBack }: { entries: MemoryEntry[]; o
         {selecting ? <button className="memory-title-back" onClick={leaveSelection}>‹ Back</button> : <h1>Saved measurements</h1>}
         {entries.length > 0 && <button className="memory-select-button" onClick={selecting ? selectAll : () => setSelecting(true)}>{selecting ? (allSelected ? "Clear all" : "Select all") : "Select"}</button>}
       </div>
+      {entries.length > 0 && !selecting && <label className="split-control"><span>Splits</span><select value={splitDivisor} onChange={(event) => setSplitDivisor(Number(event.target.value))}><option value={0}>Off</option>{Array.from({ length: 19 }, (_, index) => index + 2).map((value) => <option value={value} key={value}>÷ {value}</option>)}</select></label>}
       {entries.length === 0 ? <p className="empty-memory">Hold on the ruler, then save a reading here.</p> : <div className={`memory-list ${selecting ? "is-selecting" : ""}`}>{entries.map((entry) => {
         const selected = selectedIds.includes(entry.id);
+        const splitParts = splitDivisor ? entry.parts.map((part) => divideMeasurementLabel(part, splitDivisor)) : [];
         return <button className={`memory-row ${selected ? "selected" : ""}`} key={entry.id} onClick={() => selecting && toggleEntry(entry.id)} disabled={!selecting}>
           {selecting && <span className="memory-check" aria-hidden="true">{selected ? "✓" : ""}</span>}
           <strong><MeasurementParts parts={entry.parts} compact /></strong>
+          {splitDivisor > 0 && <span className="memory-split"><small>÷ {splitDivisor}</small><MeasurementParts parts={splitParts} compact /></span>}
           <span>{new Date(entry.savedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
         </button>;
       })}</div>}
