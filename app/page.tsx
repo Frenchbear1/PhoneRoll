@@ -33,6 +33,7 @@ const STORE = {
   rulerScale: "phoneroll.ruler-scale.v1",
   settings: "phoneroll.settings.v1",
   memory: "phoneroll.measurement-memory.v1",
+  motionPermission: "phoneroll.motion-permission.v1",
 };
 const DEFAULT_SETTINGS: UserSettings = { units: "in", sound: false };
 
@@ -301,12 +302,22 @@ export default function Home() {
   const detectedOrientationRef = useRef(detectedOrientation);
   const orientationStableSince = useRef(0);
   const motionSampleAt = useRef(0);
+  const sensorSeenAt = useRef(0);
   const homeRoll = useRef<HomeRollRuntime>({ orientation: "unknown", acceptedAt: 0 });
   const calibrationRuntime = useRef<CalibrationRuntime>(emptyRuntime());
   const settingsRef = useRef(settings);
   const precisionReadingRef = useRef<PrecisionReading | null>(null);
   const precisionFrozenRef = useRef(false);
   const audioContext = useRef<AudioContext | null>(null);
+
+  const activateMotion = (remember: boolean) => {
+    detector.current.reset();
+    homeRoll.current = { orientation: detectedOrientationRef.current, acceptedAt: performance.now() };
+    motionEnabledRef.current = true;
+    setMotionEnabled(true);
+    setMotionNotice("");
+    if (remember) localStorage.setItem(STORE.motionPermission, "granted");
+  };
 
   useEffect(() => {
     const savedScale = Number(localStorage.getItem(STORE.rulerScale) ?? 3.78);
@@ -327,6 +338,16 @@ export default function Home() {
     });
     setMemoryEntries(Array.isArray(savedMemory) ? savedMemory.filter((entry) => entry && Array.isArray(entry.parts)) : []);
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+    if (localStorage.getItem(STORE.motionPermission) === "granted") {
+      const startedAt = performance.now();
+      activateMotion(false);
+      window.setTimeout(() => {
+        if (!motionEnabledRef.current || sensorSeenAt.current >= startedAt) return;
+        motionEnabledRef.current = false;
+        setMotionEnabled(false);
+        setMotionNotice("Tap Enable rolling to refresh motion permission.");
+      }, 1800);
+    }
   }, []);
   useEffect(() => { calibrationRef.current = calibration; localStorage.setItem(STORE.calibration, JSON.stringify({ values: calibration, orientationOrder: calibrationOrderRef.current, zeroOffset: zeroAlignmentRef.current })); }, [calibration]);
   useEffect(() => { calibrationOrderRef.current = calibrationOrder; localStorage.setItem(STORE.calibration, JSON.stringify({ values: calibrationRef.current, orientationOrder: calibrationOrder, zeroOffset: zeroAlignmentRef.current })); }, [calibrationOrder]);
@@ -416,12 +437,14 @@ export default function Home() {
       const rotation = event.rotationRate ? { x: safeNumber(event.rotationRate.alpha), y: safeNumber(event.rotationRate.beta), z: safeNumber(event.rotationRate.gamma) } : blank();
       const sample: MotionSample = { gravity, acceleration, rotation, orientation: orientationFromGravity(gravity), gravityMagnitude: magnitude(gravity), at: event.timeStamp || performance.now() };
       motionSampleAt.current = sample.at;
+      sensorSeenAt.current = sample.at;
       updateDetectedOrientation(sample.orientation, sample.at);
       if (!motionEnabledRef.current || (screenRef.current === "calibration" && calibrationPhaseRef.current === "rolling")) return;
       detector.current.update(sample);
     };
     const readOrientation = (event: DeviceOrientationEvent) => {
       const now = event.timeStamp || performance.now();
+      sensorSeenAt.current = now;
       if (now - motionSampleAt.current < 350) return;
       updateDetectedOrientation(orientationFromAngles(event.beta, event.gamma), now);
     };
@@ -451,18 +474,16 @@ export default function Home() {
       for (const event of requested) {
         const decision = await event.requestPermission?.();
         if (decision !== "granted") {
+          localStorage.removeItem(STORE.motionPermission);
           setMotionNotice("Motion permission was not enabled. Tap Enable rolling and choose Allow.");
           return false;
         }
       }
-      detector.current.reset();
-      homeRoll.current = { orientation: detectedOrientationRef.current, acceptedAt: performance.now() };
-      motionEnabledRef.current = true;
-      setMotionEnabled(true);
+      activateMotion(true);
       primeSound();
-      setMotionNotice("");
       return true;
     } catch {
+      localStorage.removeItem(STORE.motionPermission);
       setMotionNotice("Motion permission was not enabled. Tap Enable rolling and choose Allow.");
       return false;
     }
@@ -562,15 +583,11 @@ export default function Home() {
   const openSettings = () => {
     detector.current.stop();
     homeRoll.current = { orientation: "unknown", acceptedAt: 0 };
-    motionEnabledRef.current = false;
-    setMotionEnabled(false);
     setScreen("settings");
   };
   const openMemory = () => {
     detector.current.stop();
     homeRoll.current = { orientation: "unknown", acceptedAt: 0 };
-    motionEnabledRef.current = false;
-    setMotionEnabled(false);
     setScreen("memory");
   };
   const goToMeasure = () => {
