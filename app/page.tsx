@@ -136,12 +136,20 @@ const formatInches = (value: number) => {
 const formatMeasurement = (millimeters: number, units: UserSettings["units"]) => units === "mm"
   ? `${Math.max(0, Math.round(millimeters))} mm`
   : formatInches(millimeters / 25.4);
+const parseInchParts = (label: string) => {
+  const mixed = label.match(/^(\d+)\s+(\d+)\/(\d+)\s+in$/);
+  if (mixed) return { whole: mixed[1], numerator: mixed[2], denominator: mixed[3] };
+  const fraction = label.match(/^(\d+)\/(\d+)\s+in$/);
+  if (fraction) return { whole: "", numerator: fraction[1], denominator: fraction[2] };
+  const whole = label.match(/^(\d+)\s+in$/);
+  if (whole) return { whole: whole[1], numerator: "", denominator: "" };
+  return null;
+};
 const parseMeasurementLabel = (label: string) => {
-  const inch = label.match(/^(\d+)?(?:\s+)?(?:(\d+)\/(\d+))?\s+in$/);
+  const inch = parseInchParts(label);
   if (inch) {
-    const [, whole, numerator, denominator] = inch;
-    const wholeValue = whole ? Number(whole) : 0;
-    const fractionValue = numerator && denominator ? Number(numerator) / Number(denominator) : 0;
+    const wholeValue = inch.whole ? Number(inch.whole) : 0;
+    const fractionValue = inch.numerator && inch.denominator ? Number(inch.numerator) / Number(inch.denominator) : 0;
     return { valueMm: (wholeValue + fractionValue) * 25.4, units: "in" as const };
   }
   const metric = label.match(/^(\d+)\s+mm$/);
@@ -966,9 +974,9 @@ function MemoryScreen({ entries, onDelete, onBack }: { entries: MemoryEntry[]; o
 }
 
 function MeasurementText({ label, compact = false }: { label: string; compact?: boolean }) {
-  const inchMatch = label.match(/^(\d+)?(?:\s+)?(?:(\d+)\/(\d+))?\s+in$/);
-  if (!inchMatch) return <span className={`measurement-text ${compact ? "compact" : ""}`}>{label}</span>;
-  const [, whole, numerator, denominator] = inchMatch;
+  const inchParts = parseInchParts(label);
+  if (!inchParts) return <span className={`measurement-text ${compact ? "compact" : ""}`}>{label}</span>;
+  const { whole, numerator, denominator } = inchParts;
   return <span className={`measurement-text inch-format ${compact ? "compact" : ""}`}>
     {whole && <span className="whole-number">{whole}</span>}
     {numerator && denominator && <span className="stacked-fraction"><span>{numerator}</span><span>{denominator}</span></span>}
