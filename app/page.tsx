@@ -59,7 +59,7 @@ const orientationFromGravity = (vector: Vec): Orientation => {
   const v = normalize(vector);
   const choices = [
     [Math.abs(v.x), v.x > 0 ? "right_edge" : "left_edge"],
-    [Math.abs(v.y), v.y > 0 ? "bottom_edge" : "top_edge"],
+    [Math.abs(v.y), v.y > 0 ? "top_edge" : "bottom_edge"],
     [Math.abs(v.z), v.z > 0 ? "face_up" : "face_down"],
   ] as const;
   const [largest, name] = choices.sort((a, b) => b[0] - a[0])[0];
@@ -69,10 +69,10 @@ const orientationFromGravity = (vector: Vec): Orientation => {
 const orientationName = (orientation: Orientation) => ({
   face_up: "face up",
   face_down: "face down",
-  top_edge: "top edge",
-  bottom_edge: "upright / bottom edge",
-  left_edge: "left edge",
-  right_edge: "right edge",
+  top_edge: "upside down",
+  bottom_edge: "upright",
+  left_edge: "left",
+  right_edge: "right",
   unknown: "waiting for orientation",
 }[orientation]);
 const tapeEdgeForOrientation = (orientation: Orientation): TapeEdge => ({ bottom_edge: "bottom", right_edge: "right", top_edge: "top", left_edge: "left", face_up: "bottom", face_down: "top", unknown: "bottom" }[orientation]);
@@ -477,7 +477,7 @@ export default function Home() {
 
   return <main className="app-shell" onPointerDownCapture={() => { void enableMotion(); }}>
     {screen === "measure" && <MeasureScreen calibrated={calibration.every((value) => value > 0)} menuOpen={menuOpen} onMenu={() => setMenuOpen((open) => !open)} onCalibrate={openCalibration} onSettings={openSettings}>{sharedTape(false)}</MeasureScreen>}
-    {screen === "calibration" && <CalibrationScreen phase={calibrationPhase} detectedOrientation={detectedOrientation} turns={calibrationTurns} notice={calibrationNotice} rulerScale={rulerScale} reversed={reversed} onScale={(value) => setRulerScale(clamp(value, 2.5, 10))} onSaveScale={saveScale} onCaptureStart={captureStart} onSaveAlignment={saveAlignment} onBack={() => setScreen("measure")} onFinish={() => setScreen("measure")}>{sharedTape(true, tapeEdgeForOrientation(detectedOrientation))}</CalibrationScreen>}
+    {screen === "calibration" && <CalibrationScreen phase={calibrationPhase} detectedOrientation={detectedOrientation} turns={calibrationTurns} notice={calibrationNotice} rulerScale={rulerScale} reversed={reversed} onScale={(value) => setRulerScale(clamp(value, 2.5, 10))} onSaveScale={saveScale} onCaptureStart={captureStart} onSaveAlignment={saveAlignment} onBack={() => setScreen("measure")} onFinish={() => setScreen("measure")}>{sharedTape(true, calibrationPhase === "rolling" ? tapeEdgeForOrientation(detectedOrientation) : "bottom")}</CalibrationScreen>}
     {screen === "settings" && <SettingsScreen calibrated={calibration.every((value) => value > 0)} settings={settings} onChangeSettings={setSettings} onReset={resetCalibration} onBack={() => setScreen("measure")} />}
   </main>;
 }
