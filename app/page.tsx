@@ -472,20 +472,26 @@ export default function Home() {
     onEnableMotion={screen === "measure" ? enableMotion : () => undefined}
   />;
 
+  const measureEdge = tapeEdgeForOrientation(detectedOrientation);
+
   return <main className="app-shell" onPointerDownCapture={() => { void enableMotion(); }}>
-    {screen === "measure" && <MeasureScreen calibrated={calibration.every((value) => value > 0)} onCalibrate={openCalibration} onSettings={openSettings}>{sharedTape(false)}</MeasureScreen>}
+    {screen === "measure" && <MeasureScreen calibrated={calibration.every((value) => value > 0)} edge={measureEdge} onCalibrate={openCalibration} onSettings={openSettings}>{sharedTape(false, measureEdge)}</MeasureScreen>}
     {screen === "calibration" && <CalibrationScreen phase={calibrationPhase} detectedOrientation={detectedOrientation} turns={calibrationTurns} notice={calibrationNotice} rulerScale={rulerScale} onScale={(value) => setRulerScale(clamp(value, 2.5, 10))} onSaveScale={saveScale} onCaptureStart={captureStart} onSaveAlignment={saveAlignment} onBack={() => setScreen("measure")} onFinish={() => setScreen("measure")}>{sharedTape(true, calibrationPhase === "rolling" ? tapeEdgeForOrientation(detectedOrientation) : "bottom", false, false)}</CalibrationScreen>}
     {screen === "settings" && <SettingsScreen calibrated={calibration.every((value) => value > 0)} settings={settings} onChangeSettings={setSettings} onReset={resetCalibration} onBack={() => setScreen("measure")} />}
   </main>;
 }
 
-function MeasureScreen({ calibrated, onCalibrate, onSettings, children }: { calibrated: boolean; onCalibrate: () => void; onSettings: () => void; children: ReactNode }) {
-  return <section className="measure-screen">
-    <span className={`measure-status ${calibrated ? "ready" : "calibrate"}`}>{calibrated ? "Ready" : "Calibrate"}</span>
-    <span className="orientation-reminder">Lock phone orientation first</span>
-    <div className="home-actions" aria-label="PhoneRoll controls">
-      <button className="home-icon-button calibrate-icon" aria-label="Calibrate tape" title="Calibrate tape" onClick={onCalibrate} />
-      <button className="home-icon-button settings-icon" aria-label="Settings" title="Settings" onClick={onSettings}>⚙</button>
+function MeasureScreen({ calibrated, edge, onCalibrate, onSettings, children }: { calibrated: boolean; edge: TapeEdge; onCalibrate: () => void; onSettings: () => void; children: ReactNode }) {
+  return <section className={`measure-screen measure-orientation-${edge}`}>
+    <div className="measure-stage">
+      <div className="home-status-cluster">
+        <span className={`measure-status ${calibrated ? "ready" : "calibrate"}`}>{calibrated ? "Ready" : "Calibrate"}</span>
+        <span className="orientation-reminder">Lock phone orientation first</span>
+      </div>
+      <div className="home-actions" aria-label="PhoneRoll controls">
+        <button className="home-icon-button calibrate-icon" aria-label="Calibrate tape" title="Calibrate tape" onClick={onCalibrate} />
+        <button className="home-icon-button settings-icon" aria-label="Settings" title="Settings" onClick={onSettings}>⚙</button>
+      </div>
     </div>
     {children}
   </section>;

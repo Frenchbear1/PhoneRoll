@@ -1,4 +1,4 @@
-const CACHE = "phoneroll-shell-v18";
+const CACHE = "phoneroll-shell-v19";
 const CORE = ["/", "/manifest.webmanifest", "/favicon.svg"];
 
 self.addEventListener("install", (event) => {
