@@ -679,7 +679,6 @@ function MeasureScreen({ calibrated, edge, motionEnabled, motionNotice, precisio
     hold.current = null;
     onPrecisionFreeze();
   };
-  const pending = draftMeasurements.length ? draftMeasurements.join(" x ") : "";
   const lineStyle = precisionReading ? (precisionReading.edge === "left" || precisionReading.edge === "right"
     ? { top: precisionReading.y } as CSSProperties
     : { left: precisionReading.x } as CSSProperties) : undefined;
@@ -698,12 +697,14 @@ function MeasureScreen({ calibrated, edge, motionEnabled, motionNotice, precisio
       </div>
     </div>
     {precisionReading && <div className={`precision-line precision-line-${precisionReading.edge}`} style={lineStyle} aria-hidden="true" />}
-    {precisionReading && <div className="precision-readout" role="status" aria-live="polite">
-      {pending && <span className="precision-pending">{pending} x</span>}
-      <strong><MeasurementText label={precisionReading.label} /></strong>
-      <div className="precision-actions">
-        <button onClick={onAddMeasurementPart}>By</button>
-        <button onClick={onSaveMeasurement}>Save</button>
+    {precisionReading && <div className={`precision-layer precision-layer-${edge}`}>
+      <div className={`precision-readout ${draftMeasurements.length ? "has-pending" : ""}`} role="status" aria-live="polite">
+        {draftMeasurements.length > 0 && <span className="precision-pending"><MeasurementParts parts={draftMeasurements} compact /><em>x</em></span>}
+        <strong><MeasurementText label={precisionReading.label} /></strong>
+        <div className="precision-actions">
+          <button onClick={onAddMeasurementPart}>By</button>
+          <button onClick={onSaveMeasurement}>Save</button>
+        </div>
       </div>
     </div>}
     {children}
@@ -759,9 +760,9 @@ function MemoryScreen({ entries, onDelete, onBack }: { entries: MemoryEntry[]; o
   };
   return <section className="memory-screen">
     <header className={`page-header memory-header ${selecting ? "selecting" : ""}`}>
-      <button onClick={selecting ? leaveSelection : onBack}>{selecting ? "‹ Back" : "‹ Ruler"}</button>
+      <button onClick={onBack}>‹ Ruler</button>
+      {selecting && <button className="delete-memory-button" disabled={!selectedIds.length} onClick={deleteSelected}>Delete</button>}
       <span>Memory</span>
-      {selecting ? <button className="delete-memory-button" disabled={!selectedIds.length} onClick={deleteSelected}>Delete</button> : <span />}
     </header>
     <div className="memory-card">
       <div className="memory-title-row">
@@ -772,7 +773,7 @@ function MemoryScreen({ entries, onDelete, onBack }: { entries: MemoryEntry[]; o
         const selected = selectedIds.includes(entry.id);
         return <button className={`memory-row ${selected ? "selected" : ""}`} key={entry.id} onClick={() => selecting && toggleEntry(entry.id)} disabled={!selecting}>
           {selecting && <span className="memory-check" aria-hidden="true">{selected ? "✓" : ""}</span>}
-          <strong>{entry.parts.map((part, index) => <span className="memory-part" key={`${entry.id}-${index}`}><MeasurementText label={part} compact />{index < entry.parts.length - 1 && <em>x</em>}</span>)}</strong>
+          <strong><MeasurementParts parts={entry.parts} compact /></strong>
           <span>{new Date(entry.savedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
         </button>;
       })}</div>}
@@ -789,6 +790,10 @@ function MeasurementText({ label, compact = false }: { label: string; compact?: 
     {numerator && denominator && <span className="stacked-fraction"><span>{numerator}</span><span>{denominator}</span></span>}
     <span className="unit-label">in</span>
   </span>;
+}
+
+function MeasurementParts({ parts, compact = false }: { parts: string[]; compact?: boolean }) {
+  return <>{parts.map((part, index) => <span className="memory-part" key={`${part}-${index}`}><MeasurementText label={part} compact={compact} />{index < parts.length - 1 && <em>x</em>}</span>)}</>;
 }
 
 function SettingsScreen({ calibrated, settings, onChangeSettings, onReset, onBack }: { calibrated: boolean; settings: UserSettings; onChangeSettings: (settings: UserSettings) => void; onReset: () => void; onBack: () => void }) {
@@ -827,16 +832,20 @@ function TapeRuler({ offset, scaleMm, units, edge, reversed, draggable, showCont
     if (drag.current?.pointerId === event.pointerId) drag.current = null;
   };
   const readiness = motionNotice;
-  return <aside className={`tape-ruler edge-${edge} ${showEnableHint ? "is-inactive" : ""}`} aria-label="Construction tape ruler">
-    {showControls && <div className="tape-controls" aria-label="Ruler direction and zero controls"><button className={!reversed ? "selected" : ""} aria-label="Measure right" onClick={() => onDirection(false)}>→</button><button className="zero-button" onClick={onReset}>0</button><button className={reversed ? "selected" : ""} aria-label="Measure left" onClick={() => onDirection(true)}>←</button></div>}
-    <div className={`tape-viewport ${draggable ? "is-draggable" : ""}`} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}>
-      {showEnableHint && <button className="motion-hint" onClick={() => void onEnableMotion()}>Tap to enable rolling</button>}
-      {readiness && <span className="motion-status">{readiness}</span>}
-      {units === "in"
-        ? TAPE_TICKS.map(({ division, inch, fraction }) => <TapeTick key={division} x={offset + direction * (division / 16) * pixelsPerUnit} inch={inch} fraction={fraction} />)
-        : METRIC_TICKS.map(({ millimeter, centimeter, remainder }) => <MetricTick key={millimeter} x={offset + direction * millimeter * pixelsPerUnit} centimeter={centimeter} remainder={remainder} />)}
-    </div>
-  </aside>;
+  return <>
+    {showControls && <div className={`tape-control-stage control-orientation-${edge}`}>
+      <div className="tape-controls" aria-label="Ruler direction and zero controls"><button className={!reversed ? "selected" : ""} aria-label="Measure right" onClick={() => onDirection(false)}>→</button><button className="zero-button" onClick={onReset}>0</button><button className={reversed ? "selected" : ""} aria-label="Measure left" onClick={() => onDirection(true)}>←</button></div>
+    </div>}
+    <aside className={`tape-ruler edge-${edge} ${showEnableHint ? "is-inactive" : ""}`} aria-label="Construction tape ruler">
+      <div className={`tape-viewport ${draggable ? "is-draggable" : ""}`} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}>
+        {showEnableHint && <button className="motion-hint" onClick={() => void onEnableMotion()}>Tap to enable rolling</button>}
+        {readiness && <span className="motion-status">{readiness}</span>}
+        {units === "in"
+          ? TAPE_TICKS.map(({ division, inch, fraction }) => <TapeTick key={division} x={offset + direction * (division / 16) * pixelsPerUnit} inch={inch} fraction={fraction} />)
+          : METRIC_TICKS.map(({ millimeter, centimeter, remainder }) => <MetricTick key={millimeter} x={offset + direction * millimeter * pixelsPerUnit} centimeter={centimeter} remainder={remainder} />)}
+      </div>
+    </aside>
+  </>;
 }
 
 function TapeTick({ x, inch, fraction }: { x: number; inch: number; fraction: number }) {
