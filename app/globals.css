@@ -60,11 +60,12 @@ button { cursor: pointer; }
 .memory-header > button:first-child { grid-column: 1; justify-self: start; }
 .memory-header > span { grid-column: 3; justify-self: end; margin-right: 0; }
 .memory-header .delete-memory-button { grid-column: 2; grid-row: 1; justify-self: center; color: #ff9e97 !important; }
+.memory-header .header-split-control { grid-column: 2; grid-row: 1; justify-self: center; margin: 0; }
 .precision-line-secondary { opacity: .86; box-shadow: 0 0 0 1px rgba(4,30,48,.45), 0 0 20px rgba(96,200,255,.8); }
 .precision-mode-label { color: #60c8ff; font-size: 11px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
 .split-control { display: flex; align-items: center; justify-content: flex-end; gap: 9px; margin: -7px 0 13px; color: #9b9d96; font-size: 12px; font-weight: 800; }
-.split-control select { min-height: 32px; padding: 0 30px 0 10px; border: 1px solid #3f4142; border-radius: 9px; background: #17191a; color: #f4f0dc; font: inherit; }
-.memory-split { display: grid !important; justify-items: end; gap: 4px; min-width: 82px; color: #f4d45b !important; font-size: 13px !important; font-weight: 850 !important; }
-.memory-split small { color: #85877f; font-size: 9px; font-weight: 900; letter-spacing: .08em; text-transform: uppercase; }
+.split-control select { min-height: 32px; padding: 0 28px 0 10px; border: 1px solid #3f4142; border-radius: 9px; background: #17191a; color: #f4f0dc; font: inherit; }
+.memory-split { display: inline-flex !important; align-items: center; justify-content: flex-end; gap: 7px; min-width: 96px; color: #f5f3e7 !important; font-size: 17px !important; font-weight: 850 !important; letter-spacing: -.03em; }
+.memory-split small { color: #e3be3d; font-size: 10px; font-weight: 900; letter-spacing: .04em; text-transform: uppercase; }
 .memory-split .measurement-text.compact { justify-content: flex-end; }
 .memory-row:has(.memory-split) { align-items: center; }

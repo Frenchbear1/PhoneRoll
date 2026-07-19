@@ -152,6 +152,12 @@ const divideMeasurementLabel = (label: string, divisor: number) => {
   const parsed = parseMeasurementLabel(label);
   return parsed ? formatMeasurement(parsed.valueMm / divisor, parsed.units) : label;
 };
+const splitLabel = (divisor: number) => {
+  if (divisor === 2) return "Half";
+  if (divisor === 3) return "Thirds";
+  if (divisor === 4) return "Quarter";
+  return String(divisor);
+};
 
 const loadJSON = <T,>(key: string, fallback: T): T => {
   try {
@@ -555,11 +561,21 @@ export default function Home() {
     if (edge === "left") return clientY;
     return clientX;
   };
+  const readingLineCoordinate = (reading: PrecisionReading) => (
+    reading.edge === "left" || reading.edge === "right" ? reading.y : reading.x
+  );
+  const precisionValueMm = (first: PrecisionReading, second: PrecisionReading | null) => {
+    if (!second) return first.valueMm;
+    if (first.edge === second.edge) {
+      return Math.abs(readingLineCoordinate(second) - readingLineCoordinate(first)) / rulerScaleRef.current;
+    }
+    return Math.abs(second.valueMm - first.valueMm);
+  };
   const currentPrecisionLabel = () => {
     const first = precisionReadingRef.current;
     if (!first) return null;
     const second = precisionSecondReadingRef.current;
-    const valueMm = second ? Math.abs(second.valueMm - first.valueMm) : first.valueMm;
+    const valueMm = precisionValueMm(first, second);
     return formatMeasurement(valueMm, settingsRef.current.units);
   };
   const capturePrecisionReading = (clientX: number, clientY: number, slot = 0) => {
@@ -769,7 +785,7 @@ export default function Home() {
 
   const measureEdge = tapeEdgeForOrientation(detectedOrientation);
   const precisionDisplayLabel = precisionReading
-    ? formatMeasurement(precisionSecondReading ? Math.abs(precisionSecondReading.valueMm - precisionReading.valueMm) : precisionReading.valueMm, settings.units)
+    ? formatMeasurement(precisionValueMm(precisionReading, precisionSecondReading), settings.units)
     : "";
   const precisionIsDifference = Boolean(precisionReading && precisionSecondReading);
 
@@ -927,6 +943,7 @@ function MemoryScreen({ entries, onDelete, onBack }: { entries: MemoryEntry[]; o
     <header className={`page-header memory-header ${selecting ? "selecting" : ""}`}>
       <button onClick={onBack}>‹ Ruler</button>
       {selecting && <button className="delete-memory-button" disabled={!selectedIds.length} onClick={deleteSelected}>Delete</button>}
+      {entries.length > 0 && !selecting && <label className="split-control header-split-control" aria-label="Memory splits"><select value={splitDivisor} onChange={(event) => setSplitDivisor(Number(event.target.value))}><option value={0}>Splits</option>{Array.from({ length: 19 }, (_, index) => index + 2).map((value) => <option value={value} key={value}>{splitLabel(value)}</option>)}</select></label>}
       <span>Memory</span>
     </header>
     <div className="memory-card">
@@ -934,14 +951,13 @@ function MemoryScreen({ entries, onDelete, onBack }: { entries: MemoryEntry[]; o
         {selecting ? <button className="memory-title-back" onClick={leaveSelection}>‹ Back</button> : <h1>Saved measurements</h1>}
         {entries.length > 0 && <button className="memory-select-button" onClick={selecting ? selectAll : () => setSelecting(true)}>{selecting ? (allSelected ? "Clear all" : "Select all") : "Select"}</button>}
       </div>
-      {entries.length > 0 && !selecting && <label className="split-control"><span>Splits</span><select value={splitDivisor} onChange={(event) => setSplitDivisor(Number(event.target.value))}><option value={0}>Off</option>{Array.from({ length: 19 }, (_, index) => index + 2).map((value) => <option value={value} key={value}>÷ {value}</option>)}</select></label>}
       {entries.length === 0 ? <p className="empty-memory">Hold on the ruler, then save a reading here.</p> : <div className={`memory-list ${selecting ? "is-selecting" : ""}`}>{entries.map((entry) => {
         const selected = selectedIds.includes(entry.id);
         const splitParts = splitDivisor ? entry.parts.map((part) => divideMeasurementLabel(part, splitDivisor)) : [];
         return <button className={`memory-row ${selected ? "selected" : ""}`} key={entry.id} onClick={() => selecting && toggleEntry(entry.id)} disabled={!selecting}>
           {selecting && <span className="memory-check" aria-hidden="true">{selected ? "✓" : ""}</span>}
           <strong><MeasurementParts parts={entry.parts} compact /></strong>
-          {splitDivisor > 0 && <span className="memory-split"><small>÷ {splitDivisor}</small><MeasurementParts parts={splitParts} compact /></span>}
+          {splitDivisor > 0 && <span className="memory-split"><small>÷{splitDivisor}</small><MeasurementParts parts={splitParts} compact /></span>}
           <span>{new Date(entry.savedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
         </button>;
       })}</div>}
