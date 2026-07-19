@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 
-type Screen = "measure" | "calibration" | "settings";
+type Screen = "measure" | "calibration" | "settings" | "memory";
 type Orientation = "face_up" | "face_down" | "top_edge" | "bottom_edge" | "left_edge" | "right_edge" | "unknown";
 type TapeEdge = "bottom" | "right" | "top" | "left";
 type EngineState = "idle" | "arming" | "ready" | "moving" | "cooldown";
@@ -14,6 +14,8 @@ type ApplePermissionEvent = { requestPermission?: () => Promise<"granted" | "den
 type QuarterTurn = { from: Orientation; to: Orientation };
 type SavedCalibration = { values: number[]; orientationOrder: Orientation[]; zeroOffset: number | null };
 type UserSettings = { units: "in" | "mm"; sound: boolean; haptics: boolean };
+type PrecisionReading = { x: number; y: number; edge: TapeEdge; valueMm: number; label: string };
+type MemoryEntry = { id: string; parts: string[]; savedAt: number };
 type CalibrationRuntime = {
   lastAlignment: number;
   turnCount: number;
@@ -30,6 +32,7 @@ const STORE = {
   legacyCalibration: "phoneroll.tape-calibration.v2",
   rulerScale: "phoneroll.ruler-scale.v1",
   settings: "phoneroll.settings.v1",
+  memory: "phoneroll.measurement-memory.v1",
 };
 const TAPE_INCHES = 60;
 const TAPE_TICKS = Array.from({ length: TAPE_INCHES * 16 + 1 }, (_, division) => ({
@@ -93,6 +96,20 @@ const savedRollOrder = (order: Orientation[]) => {
   const usable = order.length === 4 && order.every((orientation) => DEFAULT_ROLL_ORDER.includes(orientation));
   return usable ? order : DEFAULT_ROLL_ORDER;
 };
+const gcd = (a: number, b: number): number => b === 0 ? Math.abs(a) : gcd(b, a % b);
+const formatInches = (value: number) => {
+  const roundedSixteenths = Math.max(0, Math.round(value * 16));
+  const whole = Math.floor(roundedSixteenths / 16);
+  const fraction = roundedSixteenths % 16;
+  if (!fraction) return `${whole} in`;
+  const divisor = gcd(fraction, 16);
+  const numerator = fraction / divisor;
+  const denominator = 16 / divisor;
+  return whole > 0 ? `${whole} ${numerator}/${denominator} in` : `${numerator}/${denominator} in`;
+};
+const formatMeasurement = (millimeters: number, units: UserSettings["units"]) => units === "mm"
+  ? `${Math.max(0, Math.round(millimeters))} mm`
+  : formatInches(millimeters / 25.4);
 
 const loadJSON = <T,>(key: string, fallback: T): T => {
   try {
@@ -241,12 +258,17 @@ export default function Home() {
   const [predictedDistance, setPredictedDistance] = useState<number | null>(null);
   const [calibrationNotice, setCalibrationNotice] = useState("");
   const [motionNotice, setMotionNotice] = useState("");
+  const [precisionReading, setPrecisionReading] = useState<PrecisionReading | null>(null);
+  const [precisionFrozen, setPrecisionFrozen] = useState(false);
+  const [draftMeasurements, setDraftMeasurements] = useState<string[]>([]);
+  const [memoryEntries, setMemoryEntries] = useState<MemoryEntry[]>([]);
 
   const detector = useRef(new QuarterTurnEngine());
   const calibrationRef = useRef(calibration);
   const calibrationOrderRef = useRef(calibrationOrder);
   const zeroAlignmentRef = useRef(zeroAlignment);
   const rulerScaleRef = useRef(rulerScale);
+  const tapeOffsetRef = useRef(tapeOffset);
   const reversedRef = useRef(reversed);
   const motionEnabledRef = useRef(motionEnabled);
   const screenRef = useRef(screen);
@@ -257,12 +279,15 @@ export default function Home() {
   const homeRoll = useRef<HomeRollRuntime>({ orientation: "unknown", acceptedAt: 0 });
   const calibrationRuntime = useRef<CalibrationRuntime>(emptyRuntime());
   const settingsRef = useRef(settings);
+  const precisionReadingRef = useRef<PrecisionReading | null>(null);
+  const precisionFrozenRef = useRef(false);
   const audioContext = useRef<AudioContext | null>(null);
 
   useEffect(() => {
     const savedScale = Number(localStorage.getItem(STORE.rulerScale) ?? 3.78);
     const savedCalibration = readSavedCalibration();
     const savedSettings = loadJSON<UserSettings>(STORE.settings, DEFAULT_SETTINGS);
+    const savedMemory = loadJSON<MemoryEntry[]>(STORE.memory, []);
     calibrationRef.current = savedCalibration.values;
     calibrationOrderRef.current = savedCalibration.orientationOrder;
     zeroAlignmentRef.current = savedCalibration.zeroOffset;
@@ -276,18 +301,23 @@ export default function Home() {
       sound: Boolean(savedSettings.sound),
       haptics: savedSettings.haptics !== false,
     });
+    setMemoryEntries(Array.isArray(savedMemory) ? savedMemory.filter((entry) => entry && Array.isArray(entry.parts)) : []);
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => undefined);
   }, []);
   useEffect(() => { calibrationRef.current = calibration; localStorage.setItem(STORE.calibration, JSON.stringify({ values: calibration, orientationOrder: calibrationOrderRef.current, zeroOffset: zeroAlignmentRef.current })); }, [calibration]);
   useEffect(() => { calibrationOrderRef.current = calibrationOrder; localStorage.setItem(STORE.calibration, JSON.stringify({ values: calibrationRef.current, orientationOrder: calibrationOrder, zeroOffset: zeroAlignmentRef.current })); }, [calibrationOrder]);
   useEffect(() => { zeroAlignmentRef.current = zeroAlignment; localStorage.setItem(STORE.calibration, JSON.stringify({ values: calibrationRef.current, orientationOrder: calibrationOrderRef.current, zeroOffset: zeroAlignment })); }, [zeroAlignment]);
   useEffect(() => { rulerScaleRef.current = rulerScale; localStorage.setItem(STORE.rulerScale, String(rulerScale)); }, [rulerScale]);
+  useEffect(() => { tapeOffsetRef.current = tapeOffset; }, [tapeOffset]);
   useEffect(() => { reversedRef.current = reversed; }, [reversed]);
   useEffect(() => { motionEnabledRef.current = motionEnabled; }, [motionEnabled]);
   useEffect(() => { screenRef.current = screen; }, [screen]);
   useEffect(() => { calibrationPhaseRef.current = calibrationPhase; }, [calibrationPhase]);
   useEffect(() => { detectedOrientationRef.current = detectedOrientation; }, [detectedOrientation]);
   useEffect(() => { settingsRef.current = settings; localStorage.setItem(STORE.settings, JSON.stringify(settings)); }, [settings]);
+  useEffect(() => { precisionReadingRef.current = precisionReading; }, [precisionReading]);
+  useEffect(() => { precisionFrozenRef.current = precisionFrozen; }, [precisionFrozen]);
+  useEffect(() => { localStorage.setItem(STORE.memory, JSON.stringify(memoryEntries)); }, [memoryEntries]);
 
   const confirmFlip = () => {
     const feedback = settingsRef.current;
@@ -409,12 +439,58 @@ export default function Home() {
     }
   };
 
+  const clearPrecisionReading = () => {
+    precisionReadingRef.current = null;
+    precisionFrozenRef.current = false;
+    setPrecisionReading(null);
+    setPrecisionFrozen(false);
+    setDraftMeasurements([]);
+  };
+  const readingCoordinate = (clientX: number, clientY: number, edge: TapeEdge) => {
+    const span = tapeSpanForEdge(edge);
+    if (edge === "top") return span - clientX;
+    if (edge === "right") return span - clientY;
+    if (edge === "left") return clientY;
+    return clientX;
+  };
+  const capturePrecisionReading = (clientX: number, clientY: number) => {
+    if (precisionFrozenRef.current) return;
+    const edge = tapeEdgeForOrientation(detectedOrientationRef.current);
+    const direction = reversedRef.current ? -1 : 1;
+    const coordinate = readingCoordinate(clientX, clientY, edge);
+    const valueMm = Math.max(0, ((coordinate - tapeOffsetRef.current) / direction) / rulerScaleRef.current);
+    const reading = { x: clientX, y: clientY, edge, valueMm, label: formatMeasurement(valueMm, settingsRef.current.units) };
+    precisionReadingRef.current = reading;
+    setPrecisionReading(reading);
+  };
+  const freezePrecisionReading = () => {
+    if (!precisionReadingRef.current) return;
+    precisionFrozenRef.current = true;
+    setPrecisionFrozen(true);
+  };
+  const saveMemoryReading = () => {
+    const parts = precisionReadingRef.current ? [...draftMeasurements, precisionReadingRef.current.label] : draftMeasurements;
+    if (!parts.length) return;
+    setMemoryEntries((current) => [{ id: `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`, parts, savedAt: Date.now() }, ...current]);
+    clearPrecisionReading();
+  };
+  const addMemoryPart = () => {
+    const reading = precisionReadingRef.current;
+    if (!reading) return;
+    setDraftMeasurements((current) => [...current, reading.label]);
+    precisionReadingRef.current = null;
+    precisionFrozenRef.current = false;
+    setPrecisionReading(null);
+    setPrecisionFrozen(false);
+  };
+
   const resetTapeZero = () => {
     const startingEdge = zeroAlignmentRef.current ?? -2;
     const edge = tapeEdgeForOrientation(detectedOrientationRef.current);
     const tapeSpan = tapeSpanForEdge(edge);
     homeRoll.current = { orientation: detectedOrientationRef.current, acceptedAt: performance.now() };
     setTapeOffset(reversedRef.current ? tapeSpan - startingEdge : startingEdge);
+    clearPrecisionReading();
   };
   useEffect(() => {
     const zeroOnHome = () => {
@@ -453,6 +529,13 @@ export default function Home() {
     motionEnabledRef.current = false;
     setMotionEnabled(false);
     setScreen("settings");
+  };
+  const openMemory = () => {
+    detector.current.stop();
+    homeRoll.current = { orientation: "unknown", acceptedAt: 0 };
+    motionEnabledRef.current = false;
+    setMotionEnabled(false);
+    setScreen("memory");
   };
   const goToMeasure = () => {
     resetTapeZero();
@@ -555,14 +638,52 @@ export default function Home() {
   const measureEdge = tapeEdgeForOrientation(detectedOrientation);
 
   return <main className="app-shell" onPointerDownCapture={() => { void enableMotion(); }}>
-    {screen === "measure" && <MeasureScreen calibrated={calibration.every((value) => value > 0)} edge={measureEdge} motionEnabled={motionEnabled} motionNotice={motionNotice} onEnableMotion={enableMotion} onCalibrate={openCalibration} onSettings={openSettings}>{sharedTape(false, measureEdge)}</MeasureScreen>}
+    {screen === "measure" && <MeasureScreen calibrated={calibration.every((value) => value > 0)} edge={measureEdge} motionEnabled={motionEnabled} motionNotice={motionNotice} precisionReading={precisionReading} draftMeasurements={draftMeasurements} onPrecisionPoint={capturePrecisionReading} onPrecisionFreeze={freezePrecisionReading} onSaveMeasurement={saveMemoryReading} onAddMeasurementPart={addMemoryPart} onEnableMotion={enableMotion} onCalibrate={openCalibration} onMemory={openMemory} onSettings={openSettings}>{sharedTape(false, measureEdge)}</MeasureScreen>}
     {screen === "calibration" && <CalibrationScreen phase={calibrationPhase} detectedOrientation={detectedOrientation} turns={calibrationTurns} notice={calibrationNotice} rulerScale={rulerScale} onScale={(value) => setRulerScale(clamp(value, 2.5, 10))} onSaveScale={saveScale} onCaptureStart={captureStart} onSaveAlignment={saveAlignment} onBack={goToMeasure} onFinish={goToMeasure}>{sharedTape(true, calibrationPhase === "rolling" ? tapeEdgeForOrientation(detectedOrientation) : "bottom", false, false)}</CalibrationScreen>}
     {screen === "settings" && <SettingsScreen calibrated={calibration.every((value) => value > 0)} settings={settings} onChangeSettings={setSettings} onReset={resetCalibration} onBack={goToMeasure} />}
+    {screen === "memory" && <MemoryScreen entries={memoryEntries} onBack={goToMeasure} />}
   </main>;
 }
 
-function MeasureScreen({ calibrated, edge, motionEnabled, motionNotice, onEnableMotion, onCalibrate, onSettings, children }: { calibrated: boolean; edge: TapeEdge; motionEnabled: boolean; motionNotice: string; onEnableMotion: () => Promise<boolean>; onCalibrate: () => void; onSettings: () => void; children: ReactNode }) {
-  return <section className={`measure-screen measure-orientation-${edge}`}>
+function MeasureScreen({ calibrated, edge, motionEnabled, motionNotice, precisionReading, draftMeasurements, onPrecisionPoint, onPrecisionFreeze, onSaveMeasurement, onAddMeasurementPart, onEnableMotion, onCalibrate, onMemory, onSettings, children }: {
+  calibrated: boolean;
+  edge: TapeEdge;
+  motionEnabled: boolean;
+  motionNotice: string;
+  precisionReading: PrecisionReading | null;
+  draftMeasurements: string[];
+  onPrecisionPoint: (clientX: number, clientY: number) => void;
+  onPrecisionFreeze: () => void;
+  onSaveMeasurement: () => void;
+  onAddMeasurementPart: () => void;
+  onEnableMotion: () => Promise<boolean>;
+  onCalibrate: () => void;
+  onMemory: () => void;
+  onSettings: () => void;
+  children: ReactNode;
+}) {
+  const hold = useRef<number | null>(null);
+  const canMeasureFrom = (target: EventTarget | null) => target instanceof HTMLElement && !target.closest("button");
+  const startPreciseRead = (event: ReactPointerEvent<HTMLElement>) => {
+    if (!canMeasureFrom(event.target)) return;
+    hold.current = event.pointerId;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    onPrecisionPoint(event.clientX, event.clientY);
+  };
+  const movePreciseRead = (event: ReactPointerEvent<HTMLElement>) => {
+    if (hold.current !== event.pointerId) return;
+    onPrecisionPoint(event.clientX, event.clientY);
+  };
+  const endPreciseRead = (event: ReactPointerEvent<HTMLElement>) => {
+    if (hold.current !== event.pointerId) return;
+    hold.current = null;
+    onPrecisionFreeze();
+  };
+  const pending = draftMeasurements.length ? draftMeasurements.join(" x ") : "";
+  const lineStyle = precisionReading ? (precisionReading.edge === "left" || precisionReading.edge === "right"
+    ? { top: precisionReading.y } as CSSProperties
+    : { left: precisionReading.x } as CSSProperties) : undefined;
+  return <section className={`measure-screen measure-orientation-${edge}`} onPointerDown={startPreciseRead} onPointerMove={movePreciseRead} onPointerUp={endPreciseRead} onPointerCancel={endPreciseRead}>
     <div className="measure-stage">
       <div className="home-status-cluster">
         <span className={`measure-status ${calibrated ? "ready" : "calibrate"}`}>{calibrated ? "Ready" : "Calibrate"}</span>
@@ -573,9 +694,19 @@ function MeasureScreen({ calibrated, edge, motionEnabled, motionNotice, onEnable
       </div>
       <div className="home-actions" aria-label="PhoneRoll controls">
         <button className="home-icon-button calibrate-icon" aria-label="Calibrate tape" title="Calibrate tape" onClick={onCalibrate} />
+        <button className="home-icon-button memory-icon" aria-label="Measurement memory" title="Measurement memory" onClick={onMemory} />
         <button className="home-icon-button settings-icon" aria-label="Settings" title="Settings" onClick={onSettings}>⚙</button>
       </div>
     </div>
+    {precisionReading && <div className={`precision-line precision-line-${precisionReading.edge}`} style={lineStyle} aria-hidden="true" />}
+    {precisionReading && <div className="precision-readout" role="status" aria-live="polite">
+      {pending && <span className="precision-pending">{pending} x</span>}
+      <strong>{precisionReading.label}</strong>
+      <div className="precision-actions">
+        <button onClick={onAddMeasurementPart}>By</button>
+        <button onClick={onSaveMeasurement}>Save</button>
+      </div>
+    </div>}
     {children}
   </section>;
 }
@@ -610,6 +741,10 @@ function CalibrationScreen({ phase, detectedOrientation, turns, notice, rulerSca
     complete: <><p className="step-count">Calibration complete</p><h1>The tape is ready to roll.</h1><p>All four orientation-aware side distances are saved.</p><button className="action-button" onClick={onFinish}>Use the tape</button></>,
   };
   return <section className={`calibration-screen calibration-orientation-${rolling ? edge : "bottom"}`}><div className="calibration-stage"><header className="page-header"><button onClick={onBack}>‹ Ruler</button><span>Calibration</span></header><div className="calibration-card">{intro[phase]}{notice && <p className="calibration-notice">{notice}</p>}</div>{rolling && <div className="calibration-float"><div className="alignment-actions"><button className="plain-button" onClick={onSaveAlignment}>Save alignment</button></div><div className="corner-progress continuous-progress" aria-label="Four-side calibration progress">{Array.from({ length: 4 }, (_, index) => <span className={index < turns ? "saved" : index === turns ? "active" : ""} key={index}>{index + 1}</span>)}</div></div>}</div>{children}</section>;
+}
+
+function MemoryScreen({ entries, onBack }: { entries: MemoryEntry[]; onBack: () => void }) {
+  return <section className="memory-screen"><header className="page-header"><button onClick={onBack}>‹ Ruler</button><span>Memory</span></header><div className="memory-card"><h1>Saved measurements</h1>{entries.length === 0 ? <p className="empty-memory">Hold on the ruler, then save a reading here.</p> : <div className="memory-list">{entries.map((entry) => <div className="memory-row" key={entry.id}><strong>{entry.parts.join(" x ")}</strong><span>{new Date(entry.savedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span></div>)}</div>}</div></section>;
 }
 
 function SettingsScreen({ calibrated, settings, onChangeSettings, onReset, onBack }: { calibrated: boolean; settings: UserSettings; onChangeSettings: (settings: UserSettings) => void; onReset: () => void; onBack: () => void }) {
@@ -662,7 +797,7 @@ function TapeRuler({ offset, scaleMm, units, edge, reversed, draggable, showCont
 
 function TapeTick({ x, inch, fraction }: { x: number; inch: number; fraction: number }) {
   const kind = fraction === 0 ? "inch" : fraction % 8 === 0 ? "half" : fraction % 4 === 0 ? "quarter" : fraction % 2 === 0 ? "eighth" : "sixteenth";
-  const fractionText: Record<number, string> = { 0: String(inch), 2: "⅛", 4: "¼", 6: "⅜", 8: "½", 10: "⅝", 12: "¾", 14: "⅞" };
+  const fractionText: Record<number, string> = { 0: String(inch), 4: "¼", 8: "½", 12: "¾" };
   return <div className={`tape-tick ${kind} ${inch === 0 && fraction === 0 ? "zero-tick" : ""}`} style={{ left: x } as CSSProperties}><span>{fractionText[fraction] ?? ""}</span></div>;
 }
 
