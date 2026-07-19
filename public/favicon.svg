@@ -1,1 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="15" fill="#0b1220"/><rect x="16" y="7" width="32" height="50" rx="7" fill="#55a3ff"/><rect x="20" y="12" width="24" height="36" rx="3" fill="#08101e"/><circle cx="32" cy="52" r="2.5" fill="#08101e"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="PhoneRoll icon">
+  <rect width="64" height="64" rx="14" fill="#e5bf2e"/>
+  <rect x="9" y="9" width="46" height="46" rx="11" fill="#070909"/>
+  <path d="M16 42h32" stroke="#e5bf2e" stroke-width="4" stroke-linecap="round"/>
+  <path d="M18 34h5M28 34h4M37 34h4M46 34h2" stroke="#e5bf2e" stroke-width="3" stroke-linecap="round"/>
+  <path d="M20 24h24" stroke="#5ccfff" stroke-width="3.5" stroke-linecap="round"/>
+  <path d="M38 18l8 6-8 6" fill="none" stroke="#5ccfff" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="16" y="28" font-family="Arial, Helvetica, sans-serif" font-size="14" font-weight="900" fill="#ffffff">PR</text>
+</svg>
