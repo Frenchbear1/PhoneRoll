@@ -35,6 +35,7 @@ const STORE = {
   settings: "phoneroll.settings.v1",
   memory: "phoneroll.measurement-memory.v1",
 };
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
 const DEFAULT_SETTINGS: UserSettings = { units: "in", manualAdvance: false };
 const ROLL_CLICK_SRC = "data:audio/wav;base64,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";
 
@@ -52,11 +53,11 @@ const emptyRuntime = (): CalibrationRuntime => ({ lastAlignment: 0, turnCount: 0
 
 const orientationFromGravity = (vector: Vec): Orientation => {
   const v = normalize(vector);
-  const choices = [
+  const choices: Array<[number, Orientation]> = [
     [Math.abs(v.x), v.x > 0 ? "right_edge" : "left_edge"],
     [Math.abs(v.y), v.y > 0 ? "top_edge" : "bottom_edge"],
     [Math.abs(v.z), v.z > 0 ? "face_up" : "face_down"],
-  ] as const;
+  ];
   const [largest, name] = choices.sort((a, b) => b[0] - a[0])[0];
   return largest > 0.8 ? name : "unknown";
 };
@@ -69,8 +70,16 @@ const orientationName = (orientation: Orientation) => ({
   left_edge: "left",
   right_edge: "right",
   unknown: "waiting for orientation",
-}[orientation]);
-const tapeEdgeForOrientation = (orientation: Orientation): TapeEdge => ({ bottom_edge: "bottom", right_edge: "right", top_edge: "top", left_edge: "left", face_up: "bottom", face_down: "top", unknown: "bottom" }[orientation]);
+} satisfies Record<Orientation, string>)[orientation];
+const tapeEdgeForOrientation = (orientation: Orientation): TapeEdge => ({
+  bottom_edge: "bottom",
+  right_edge: "right",
+  top_edge: "top",
+  left_edge: "left",
+  face_up: "bottom",
+  face_down: "top",
+  unknown: "bottom",
+} satisfies Record<Orientation, TapeEdge>)[orientation];
 const DEFAULT_ROLL_ORDER: Orientation[] = ["bottom_edge", "right_edge", "top_edge", "left_edge"];
 const orientationFromAngles = (beta: number | null, gamma: number | null): Orientation => {
   const b = safeNumber(beta);
@@ -406,7 +415,7 @@ export default function Home() {
       manualAdvance: Boolean(savedSettings.manualAdvance),
     });
     setMemoryEntries(Array.isArray(savedMemory) ? savedMemory.filter((entry) => entry && Array.isArray(entry.parts)) : []);
-    if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+    if ("serviceWorker" in navigator) navigator.serviceWorker.register(`${BASE_PATH}/sw.js`).catch(() => undefined);
   }, []);
   useEffect(() => { calibrationRef.current = calibration; localStorage.setItem(STORE.calibration, JSON.stringify({ values: calibration, orientationOrder: calibrationOrderRef.current, zeroOffset: zeroAlignmentRef.current })); }, [calibration]);
   useEffect(() => { calibrationOrderRef.current = calibrationOrder; localStorage.setItem(STORE.calibration, JSON.stringify({ values: calibrationRef.current, orientationOrder: calibrationOrder, zeroOffset: zeroAlignmentRef.current })); }, [calibrationOrder]);
@@ -499,7 +508,9 @@ export default function Home() {
         return false;
       }
       setMotionNotice("");
-      const requested = [motion, orientation].filter((event): event is ApplePermissionEvent => Boolean(event) && typeof event.requestPermission === "function");
+      const requested = [motion, orientation].filter(
+        (event): event is ApplePermissionEvent => event !== null && typeof event.requestPermission === "function",
+      );
       for (const event of requested) {
         const decision = await event.requestPermission?.();
         if (decision !== "granted") {

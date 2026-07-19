@@ -1,12 +1,12 @@
 const CACHE = "phoneroll-shell-v38";
 const CORE = [
-  "/",
-  "/manifest.webmanifest",
-  "/favicon.svg",
-  "/icon.svg",
-  "/icon-192.png",
-  "/icon-512.png",
-  "/apple-touch-icon.png",
+  "./",
+  "manifest.webmanifest",
+  "favicon.svg",
+  "icon.svg",
+  "icon-192.png",
+  "icon-512.png",
+  "apple-touch-icon.png",
 ];
 
 self.addEventListener("install", (event) => {
