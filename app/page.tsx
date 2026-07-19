@@ -13,7 +13,7 @@ type MotionSample = { gravity: Vec; acceleration: Vec; rotation: Vec; orientatio
 type ApplePermissionEvent = { requestPermission?: () => Promise<"granted" | "denied"> };
 type QuarterTurn = { from: Orientation; to: Orientation };
 type SavedCalibration = { values: number[]; orientationOrder: Orientation[]; zeroOffset: number | null };
-type UserSettings = { units: "in" | "mm" };
+type UserSettings = { units: "in" | "mm"; manualAdvance: boolean };
 type PrecisionReading = { x: number; y: number; edge: TapeEdge; valueMm: number; label: string };
 type MemoryEntry = { id: string; parts: string[]; savedAt: number };
 type CalcTool = "none" | "total" | "area" | "perimeter" | "diagonal" | "volume" | "spaceDiagonal" | "circumference" | "diameter";
@@ -35,7 +35,7 @@ const STORE = {
   settings: "phoneroll.settings.v1",
   memory: "phoneroll.measurement-memory.v1",
 };
-const DEFAULT_SETTINGS: UserSettings = { units: "in" };
+const DEFAULT_SETTINGS: UserSettings = { units: "in", manualAdvance: false };
 const ROLL_CLICK_SRC = "data:audio/wav;base64,UklGRiQUAABXQVZFZm10IBAAAAABAAEAgD4AAAB9AAACABAAZGF0YQAUAAAAAKY+c2MUYYk8Egq34rDXH+ocCwIkpyJEA+PSHqlNnBO2Hu7ELcNar2MPSAQY1Oup17Thn/9/HDEkNA6P4ha2D6BRrvXdQBxzTwZjS1G8Jc72iNqn27D0ZRPCIk4W/vAbxLam8KkM0M4KD0IzX91XlDIMAxPgOdjp6lgJuB50G6f9fNLBr92oyMQa+jEzdliLW/g97Q/s54HXzOL//okYsR0gCJDgmrrhqm28vep9IytPPlxqR9AcovF32bvc9vS8EC8dIhC97aXGqa8atzrdmRPIQwJai04aKa787d362M/r5Ac3GoYVgPk/08a2yrT50SME1TYFVRhTPjSACJrkq9cF5Jf+LRVHGG0Dzd+4v1q1Qsmt9eMokU3yVMI9hxQe7dDY/N1n9YYOgxg5C77r9MmFuD7DtuiJGgpEGFRGRTMgBPdM3PvZ2uzEBnIWtxCV9ujU8r31v6XdWgzlOKlQhEr+KswB5OEr2Gflbv5lEtcT6P8F4DPFUL/H1OD+oyzgSlRNdTTyDEnpmdhx3wf2wQypFGkHxurMzR7BS86R8swfDUOrTTY88xcV8jLbQNsP7vgFWBPlDLH0PNcVxUPK1ufmEpc5mUv5QVEi2fvM3wTZ9uaC/iQQRBBi/QHh18qnyPzecQbuLk1HkEWdKxwGI+bR2Bvh2PZkC4sRhwSf6vnRUck52OL6jSMIQehGeDNnEOPtntrK3G7veQXXEOsJpPMI2gfMqNOa8OwXHzkHRpo5Rxqp9k/eNNqw6NH+XQ5vDa77juJ60EjR6ueEDPcvDEPOPVEjCgCr43TZ+uLX92UKDw9tAhrrTtYC0QrhwgH6JSw++z8pK5sJbeqM2pTe9vBCBd0OqAdA8x7dqNIb3AX4mBuwNx5AhTHuEj/yZ92125PqVP8BDT0LpPqB5PrVJtmc7z0R7S9LPjE2oRvC+tzhfNoG5f34twkeDfYADeyp2h7YwehRB0EnqzoKOVwjkgOu5/LamOCg8kcFVQ39BWDzW+Di2JvjL/4RHnk1CDrVKU8Mlu4N3X/dmOwDAAAMkgkg+rTmPNs74CT2wBT+LjQ51C6bFD72rODf2zvnRfpOCaELAwBU7erem95r764LjSetNjUyIhxP/p7lyNvO4mT0fQUsDM0E3/Og46TeL+oxA4AfpDLnM5sibQam6zXdid+47tQASQtUCAP6Cekt4IXmlfsyF1Ut7TPPJ0UOe/IQ4JTdjumk+xwJgQp2/9Hu/eJx5BX1+Q4IJ1wyliuFFc35M+QB3SzlO/bZBVAL/QOi9NTm5OPe7ygHDSBaL9ot6RtJAWjp093J4ejwvgHMCm0HMPpn677kCewHALYYGSuXLjchowhw7/3fjd/36xL9FAmsCTX/avDR5qHp0vlTEdkl2S1FJY4PBvZf45DeqOcb+FAGrwp2A5D15emd6LX0MQrdH74r+ifHFeD8zufa3jLkIfO3AnwKyQaR+rrt5+jP8JMDcBlwKE0pFxu0AxTtY+C+4Wvuhf4pCQ8JK/8L8lnqLe62/dwSIiRDKVIfPgrz8hTjZ+A36vv51wY7CiUDlPbF7M/sxfhnDBIf8SddIj0QKvnL5jnguOZZ9bQDTApVBhH78u+j7OH0UQaCGXglJyR6FXb/Wesz4Rrk4fD1/1EJmwhF/6Xzj+0c8tMAsxMGIrMkyxmUBYnwRON44s3s0vtlB+UJ+QKe92rve/Ac/OYNzR0NJBEdTAsf9lHm5OFQ6Yf3rgQuCgMGofsF8vPvS/hZCAgZUCI5H2YQ4Psy6l/ik+ZP81gBgAlCCHT/KvVv8Hf1QgP0E6AfPyC5FI4Buu7f47bkYe+Y/fAHognjAqL4z/Gn883+yg4qHCogIxj0BrTzUObK4+7rovmbBRsKxgU1/Orz2PId+8UJIRgPH5Aa3gvr+JDp1uMf6az1qQKwCfoHrf+T9vnySPgWBboTCx33GyEQJv557dbkEufp8Uf/cAhpCdoClvnx81v26gAsD0QaXBycEzID3fG45t3liO6k+3YGCAqUBcL8nvVW9WX9qgrmFssbORbfB4z2ZemK5a/r8PfgA9gJuQfm/9n3L/Wc+mUGIBNdGusXBQxS+7nsF+aA6Vz01wDhCDIJ0wJ0+tD1oPiHAiMPMRiyGIEPAACN8HrnEOgT8YX9OAfxCWUFQ/0f93X3Mv8gC2wVlRg6EmkEt/Sf6WvnO+4U+vkE8gl4BxgA+fgU94D8Qgc6EqgXOxqdEiME5vTQ6vLocu5p9zX/5gKTAt8AIQEqBfkLEBJWE3QNdAGk87zpHuiU77z8fgntDycN0wJk9obu3u+x+qMKpRg4Hm8YSgnE9hnoj+JF5wjzJAA8CbELhwhiA0sAagHuBakK+QvwB43/Wvag8BrxcfdMAPsG7QekAiH6dfM28/76UgiTFX0cKhkGDNT5nOmd4YXkYfCr/+kLqBBMDQgF/vyR+Un8OgM8CisNFgoyAiL5AfNI8pL2+/zHAYICXv8W+2z59vxyBZIPahbZFcIM5P3X7p7l5+VU76H9mQr4EMAOCQba+5v1gPYD/koIGxBuEVsLcgBj9arug+4A9ND7FQJ0BCIDjADE/5ECSQj/DQcQAgxhAn72K+136qLvZvrzBTINKQ1vBt78rvXl9Ff7MQZOEKkUxRDcBUz4iu2o6ZLt1vYIAfoHpQnlBrICTQBuAVkFVglJCoUG3f5k9unwB/G89lD/pQZLCT0Gef8F+eb2BvsRBPsN2xNKEiAJqPsw76nocepT8zT/EAlODUILOwUj/2X8O/4wAwgIjQlNBmX/5vdF84vzUPj6/iYEcQW/Akf+WPuG/CMC5QngD34QXQo2/z3zTOum6nTxrvyFB6ANDA0JB0b/9vnG+ZP+nAX1CooLqAZN/h/2oPF68sr3uv4FBK0F5APKACP/rwAeBRgKcwzvCY4Cz/ik8J7tKfHM+cwD4wpHDO8HkQA++lz4+/tPA5YK7Q1CC1IDWfl98ejuV/Lf+QECaAd2COQFJgL0/8IA/wNoB1QIQQXD/mL3afI68hH30P75BWoJ3weYArr8sPlv+2MBrQh6DewMkAap/DbzG+5Z7y/2hf9uBwMLnAnxBA8AtP3l/ogCEAbuBvoDI/7191j0BvWt+RIAOAXjBr4EfgD4/Jj8CgDHBcQK+gv4B8P/efbz7/vu+/PM/LMFJQtaCw0H+gBw/Kj7t/6fA2MHnge7A0jSBdAB4FYgZ1BCcB6P5o/50CvwYnCccHVgKi+tDz5vBS8yv6kQIECQMLMgh5AgH9ofp4/GcBqQY+CWoHngFB+oT04PLu9Sj8wQIGB6QHMQW4AYb/6P95AmUFaAYhBOn+wvhu9A30Afix/jsF3whGCDAEB/+o++z7uP8EBd8I6QiIBE39NvZT8k7zrPgSAGoGVgk9CG4EVwAy/ub+oAFaBPwEjgLH/b343PWh9tj6qAB/BVUHsAXZAS7+3fzA/uEC7gZkCOMF9f/j+LPzt/J19mL9mwRCCcUJjgatAcP9q/yb/h0C4wQDBf0BA/1c+EL2wfcz/JQBjAWVBrcEbwHd/pP+wgAVBGEG1AX3AQ78jfb285/1APvoAYIHognGB0MDk/4O/Mz8HwD6AwUG0ASWACP77/bv9Z/4zf0yA5wG7gaeBF4BJf8g/xcBlAOxBCwDKP8z+o72EvY4+dD+hwQACPQHxwRUAPf8XPyw/ogCoAUCBgwDzP2F+Jv1b/a0+pkArQUDCBAH1wNNAE3+o/63AOwCiAOwAej92/mJ9z744fv0AE4FIwfmBYoC/v4r/f/95wAmBK0FOgQFALr6sPbQ9af4GP7nAigF5wVhBIwB7/7S/aD+qgCPAvQCRAEJ/rH65fis+ev8YQFABQAHFAYoA7//c/0s/bj+8gBiAgYC2f/b/I36Mvol/Kn/RQN8BX0FjAPMAKr+HP4s//UAKgLKAbH/uPxR+s35rftV/1EDAAZXBl8EKgFK/gf9xP3W/+IBmAJgAa7+yfsr+sP6ef03AXIE4AUUBaoC7/8t/hH+U//sAK0B4AC3/jb8sfoe+479GAFJBM4FGwWpArr/s/1v/dT+5QBQAhcCHwBD/ef6T/r1+0r/9QJ5BeAFMQRgAcz+k/0G/pH/EQF2AVcALP4T/Dv7Sfz3/jICoARBBe8DawH5/rv9If64/2UBBgIHAbj+Lvy6+j/7u/1AAWAE1wUkBb8C2v/G/VD9Zv4qAHABXAHZ/6L95/us+0L9GwAIA88EvwQFA48Aj/7i/aT+JgBZAVgB7f+z/cz7T/u1/JX/zgILBWUF0gMgAZb+Sv2m/TT/6ACvAfwAFv/x/Ln7MvxV/kwB3AP1BDsEJAK+/yL+6f3p/k8AIAG3ACn/O/3/+0f8MP4KAa0D+gRwBGMC0//p/W79ZP4QAGEBfAE0ACL+WPzb+xn9r/+QAo0E2QRwAw4B1P6v/fP9Mv+DAAMBTQC1/hb9avw9/WP/AwIDBIgEaAM4AQP/wf3l/SL/nABfAd0AQv9Z/S78gvxk/iIBngPPBEAERgLV//79d/1A/rH/1wD4APT/Uf7//KP8//1kANoCVQQ6BKYCXwBu/p79IP5y/7EAEQFGALT+NP2t/JX9sf8pAvQDTwQhA/8A5/67/dz9//5VAAYBmgBA/7H91/xO/RH/dAF5A0IEgAOZAW//9P20/Zb+7v/fANEAvf82/h39Kf2K/sIA6gITBMIDJQIAAEf+qP09/oH/oQDqACUAu/53/SX9Hv4bAE8CxwPkA58ClQCx/rn9+P0W/1EA5wB3ADr/4f0//dL9hP+tAWID5gMCAyYBKv/m/cv9s/72/8oArgCt/1T+cv2k/QH/DAHqAskDSwOuAa//K/64/V3+k/+XAMwADgDK/rv9lP2X/nEAYwKRA3cDJgI3AIb+wP0Y/jD/UgDPAF0APP8U/p/9Rv7k/9QBQAOHA4sCvwDx/uD95/3S/gAAugCUAKX/d/7E/RL+Z/9DAdsCegPZAkABaf8Z/s79f/6n/5AAtQAAAN7+/f35/f7+tQBnAlMDDQO1Aeb/Zv7N/Tr+TP9VAL0ASgBE/0f++f2t/jEA6gEUAygDGgJkAMT+4/0H/vP+DACvAIEAo/+b/hH+dP68/2kBwQIoA2sC3gAu/w/+6f2j/r3/jQCjAPj/9f49/lP+V//pAF8CEAOmAk8BoP9Q/uD9X/5o/1sAsAA+AFD/ef5L/gX/bwDzAeECyQKyARQAof7s/Sr+Fv8bAKgAcwCm/8D+WP7K/gAAgAGeAtUCBQKGAP/+Dv4H/sn+0/+NAJYA9P8O/3j+pP6g/w0BTQLJAkQC8gBl/0P++P2G/ob/YgCmADUAXv+o/pT+Uf+eAPABqAJuAlMB0P+I/vz9UP44/yoAowBpAKz/5P6Z/hT/NwCMAXUCggKlATkA2v4U/in+7/7p/44AjQDz/yf/r/7r/t3/JQEyAoIC5wGfADX/Pv4V/q3+o/9qAJ8AMABu/9X+1v6Q/8EA4wFtAhYC/ACW/3j+Ev53/lv/OQCgAGIAtP8H/9P+U/9iAI0BRwIyAk4B+P+//iH+Tv4V/wAAkQCFAPX/QP/h/ij/DAAyARECOwKRAVYAEP9B/jX+1v6//3MAmgAuAH7//v4P/8T/2ADPATECxAGvAGf/cf4s/p/+ff9IAJ4AXQC8/yf/B/+I/4IAhQEWAuYB/wDA/63+M/51/jv/FACTAIAA+P9Y/w7/XP8yADYB7AH1AUIBGAD0/kv+WP7+/tv/ewCVACwAjv8k/0D/7v/mALYB9AF3AWwAQf9x/kn+yP6d/1cAnQBZAMX/RP80/7T/mAB3AeMBnQG4AJL/o/5K/pz+YP8pAJYAfAD7/27/Nv+I/08AMwHEAbMB+wDk/+D+Wv58/iX/9f+DAJIALACd/0X/av8OAOwAmAG5ATEBMQAk/3f+av7x/r3/ZACcAFYAzv9f/1r/2P+mAGQBsAFZAXoAbf+h/mX+xP6D/zwAmQB4AP//gv9Y/63/YwApAZoBdAG7ALj/1P5t/qL+S/8NAIoAjwAsAKr/Yv+O/ycA6wB4AYAB8QAAABD/g/6M/hj/2v9wAJoAUwDW/3b/e//0/60ATQF+ARsBRABR/6T+gv7s/qT/TQCaAHQAAQCT/3b/yv9xABsBcAE5AYIAlP/P/oT+yP5w/yMAjwCLACsAtv97/6v/OQDlAFYBSgG4ANf/A/+T/q/+Pv/1/3oAmABQAN3/i/+X/wkArgA0AU4B4wAWADz/rf6h/hP/w/9cAJsAcAADAKL/j//h/3gACgFGAQMBUQB4/9H+nv7u/pL/NwCTAIcAKgDA/5D/w/00=";
 
 const blank = (): Vec => ({ x: 0, y: 0, z: 0 });
@@ -373,6 +373,7 @@ export default function Home() {
   const orientationStableSince = useRef(0);
   const motionSampleAt = useRef(0);
   const homeRoll = useRef<HomeRollRuntime>({ orientation: "unknown", acceptedAt: 0 });
+  const manualRollIndex = useRef(0);
   const calibrationRuntime = useRef<CalibrationRuntime>(emptyRuntime());
   const settingsRef = useRef(settings);
   const precisionReadingRef = useRef<PrecisionReading | null>(null);
@@ -402,6 +403,7 @@ export default function Home() {
     setTapeOffset(savedCalibration.zeroOffset ?? -2);
     setSettings({
       units: savedSettings.units === "mm" ? "mm" : "in",
+      manualAdvance: Boolean(savedSettings.manualAdvance),
     });
     setMemoryEntries(Array.isArray(savedMemory) ? savedMemory.filter((entry) => entry && Array.isArray(entry.parts)) : []);
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => undefined);
@@ -423,6 +425,7 @@ export default function Home() {
   useEffect(() => { localStorage.setItem(STORE.memory, JSON.stringify(memoryEntries)); }, [memoryEntries]);
 
   const advanceHomeTape = (nextOrientation: Orientation, at: number) => {
+    if (settingsRef.current.manualAdvance) return;
     if (screenRef.current !== "measure" || !motionEnabledRef.current || nextOrientation === "unknown") return;
     const saved = calibrationRef.current;
     if (saved.some((value) => value <= 0)) {
@@ -602,6 +605,7 @@ export default function Home() {
     const edge = tapeEdgeForOrientation(detectedOrientationRef.current);
     const tapeSpan = tapeSpanForEdge(edge);
     homeRoll.current = { orientation: detectedOrientationRef.current, acceptedAt: performance.now() };
+    manualRollIndex.current = 0;
     setTapeOffset(reversedRef.current ? tapeSpan - startingEdge : startingEdge);
     clearPrecisionReading();
   };
@@ -622,6 +626,23 @@ export default function Home() {
     reversedRef.current = nextReversed;
     resetTapeZero();
     if (motionEnabledRef.current) detector.current.reset();
+  };
+  const manualStepTape = (step: -1 | 1) => {
+    const saved = calibrationRef.current;
+    if (saved.some((value) => value <= 0)) return;
+    const direction = reversedRef.current ? -1 : 1;
+    if (step > 0) {
+      const index = manualRollIndex.current % 4;
+      const distanceMm = saved[index];
+      manualRollIndex.current = (index + 1) % 4;
+      setTapeOffset((current) => current - direction * distanceMm * rulerScaleRef.current);
+    } else {
+      const index = (manualRollIndex.current + 3) % 4;
+      const distanceMm = saved[index];
+      manualRollIndex.current = index;
+      setTapeOffset((current) => current + direction * distanceMm * rulerScaleRef.current);
+    }
+    clearPrecisionReading();
   };
   const openCalibration = () => {
     detector.current.stop();
@@ -752,8 +773,10 @@ export default function Home() {
     motionNotice=""
     onOffset={setTapeOffset}
     onDirection={chooseDirection}
+    onManualStep={manualStepTape}
     onReset={resetTapeZero}
     onEnableMotion={screen === "measure" ? enableMotion : () => undefined}
+    manualAdvance={settings.manualAdvance}
   />;
 
   const measureEdge = tapeEdgeForOrientation(detectedOrientation);
@@ -763,17 +786,18 @@ export default function Home() {
   const precisionIsDifference = Boolean(precisionReading && precisionSecondReading);
 
   return <main className="app-shell">
-    {screen === "measure" && <MeasureScreen calibrated={calibration.every((value) => value > 0)} edge={measureEdge} motionEnabled={motionEnabled} motionNotice={motionNotice} precisionReading={precisionReading} precisionSecondReading={precisionSecondReading} precisionDisplayLabel={precisionDisplayLabel} precisionIsDifference={precisionIsDifference} precisionFrozen={precisionFrozen} draftMeasurements={draftMeasurements} onPrecisionPoint={capturePrecisionReading} onPrecisionFreeze={freezePrecisionReading} onPrecisionDismiss={dismissPrecisionReading} onSaveMeasurement={saveMemoryReading} onAddMeasurementPart={addMemoryPart} onEnableMotion={enableMotion} onMemory={openMemory} onSettings={openSettings}>{sharedTape(false, measureEdge)}</MeasureScreen>}
+    {screen === "measure" && <MeasureScreen calibrated={calibration.every((value) => value > 0)} edge={measureEdge} motionEnabled={motionEnabled} manualAdvance={settings.manualAdvance} motionNotice={motionNotice} precisionReading={precisionReading} precisionSecondReading={precisionSecondReading} precisionDisplayLabel={precisionDisplayLabel} precisionIsDifference={precisionIsDifference} precisionFrozen={precisionFrozen} draftMeasurements={draftMeasurements} onPrecisionPoint={capturePrecisionReading} onPrecisionFreeze={freezePrecisionReading} onPrecisionDismiss={dismissPrecisionReading} onSaveMeasurement={saveMemoryReading} onAddMeasurementPart={addMemoryPart} onEnableMotion={enableMotion} onMemory={openMemory} onSettings={openSettings}>{sharedTape(false, measureEdge)}</MeasureScreen>}
     {screen === "calibration" && <CalibrationScreen phase={calibrationPhase} detectedOrientation={detectedOrientation} turns={calibrationTurns} notice={calibrationNotice} rulerScale={rulerScale} onScale={(value) => setRulerScale(clamp(value, 2.5, 10))} onSaveScale={saveScale} onCaptureStart={captureStart} onSaveAlignment={saveAlignment} onBack={goToMeasure} onFinish={goToMeasure}>{sharedTape(true, calibrationPhase === "rolling" ? tapeEdgeForOrientation(detectedOrientation) : "bottom", false, false)}</CalibrationScreen>}
     {screen === "settings" && <SettingsScreen calibrated={calibration.every((value) => value > 0)} settings={settings} onChangeSettings={updateSettings} onReset={resetCalibration} onCalibrate={openCalibration} onBack={goToMeasure} />}
     {screen === "memory" && <MemoryScreen entries={memoryEntries} onDelete={(ids) => setMemoryEntries((current) => current.filter((entry) => !ids.includes(entry.id)))} onBack={goToMeasure} />}
   </main>;
 }
 
-function MeasureScreen({ calibrated, edge, motionEnabled, motionNotice, precisionReading, precisionSecondReading, precisionDisplayLabel, precisionIsDifference, precisionFrozen, draftMeasurements, onPrecisionPoint, onPrecisionFreeze, onPrecisionDismiss, onSaveMeasurement, onAddMeasurementPart, onEnableMotion, onMemory, onSettings, children }: {
+function MeasureScreen({ calibrated, edge, motionEnabled, manualAdvance, motionNotice, precisionReading, precisionSecondReading, precisionDisplayLabel, precisionIsDifference, precisionFrozen, draftMeasurements, onPrecisionPoint, onPrecisionFreeze, onPrecisionDismiss, onSaveMeasurement, onAddMeasurementPart, onEnableMotion, onMemory, onSettings, children }: {
   calibrated: boolean;
   edge: TapeEdge;
   motionEnabled: boolean;
+  manualAdvance: boolean;
   motionNotice: string;
   precisionReading: PrecisionReading | null;
   precisionSecondReading: PrecisionReading | null;
@@ -837,10 +861,10 @@ function MeasureScreen({ calibrated, edge, motionEnabled, motionNotice, precisio
   return <section className={`measure-screen measure-orientation-${edge}`} onPointerDown={startPreciseRead} onPointerMove={movePreciseRead} onPointerUp={endPreciseRead} onPointerCancel={endPreciseRead}>
     <div className="measure-stage">
       <div className="home-status-cluster">
-        <span className={`measure-status ${calibrated ? "ready" : "calibrate"}`}>{calibrated ? "Calibrated" : "Calibrate"}{calibrated && motionEnabled && <span className="status-dot"> · </span>} {calibrated && motionEnabled && <span className="rolling-inline">Rolling live</span>}</span>
-        <span className="orientation-reminder">Lock phone orientation first</span>
-        {calibrated && !motionEnabled && <button className="enable-motion-button" onClick={() => void onEnableMotion()}>Enable rolling</button>}
-        {motionNotice && !motionEnabled && <span className="rolling-warning">{motionNotice}</span>}
+        <span className={`measure-status ${calibrated ? "ready" : "calibrate"}`}>{calibrated ? "Calibrated" : "Calibrate"}{calibrated && (motionEnabled || manualAdvance) && <span className="status-dot"> · </span>} {calibrated && manualAdvance && <span className="rolling-inline">Manual advance</span>}{calibrated && !manualAdvance && motionEnabled && <span className="rolling-inline">Rolling live</span>}</span>
+        <span className="orientation-reminder">{manualAdvance ? "Use arrows to step the tape" : "Lock phone orientation first"}</span>
+        {calibrated && !manualAdvance && !motionEnabled && <button className="enable-motion-button" onClick={() => void onEnableMotion()}>Enable rolling</button>}
+        {motionNotice && !manualAdvance && !motionEnabled && <span className="rolling-warning">{motionNotice}</span>}
       </div>
       <div className="home-actions" aria-label="PhoneRoll controls">
         <button className="home-icon-button memory-icon" aria-label="Measurement memory" title="Measurement memory" onClick={onMemory} />
@@ -962,14 +986,14 @@ function MeasurementParts({ parts, compact = false }: { parts: string[]; compact
 function SettingsScreen({ calibrated, settings, onChangeSettings, onReset, onCalibrate, onBack }: { calibrated: boolean; settings: UserSettings; onChangeSettings: (settings: UserSettings) => void; onReset: () => void; onCalibrate: () => void; onBack: () => void }) {
   const [confirming, setConfirming] = useState(false);
   const setSetting = <K extends keyof UserSettings>(key: K, value: UserSettings[K]) => onChangeSettings({ ...settings, [key]: value });
-  return <section className="settings-screen"><header className="page-header"><button onClick={onBack}>‹ Ruler</button><span>Settings</span></header><div className="settings-card"><h1>Ruler settings</h1><div className="settings-group"><div className="setting-row"><div><strong>Ruler labels</strong><span>Choose inches or millimeters</span></div><div className="segmented-control"><button className={settings.units === "in" ? "selected" : ""} onClick={() => setSetting("units", "in")}>in</button><button className={settings.units === "mm" ? "selected" : ""} onClick={() => setSetting("units", "mm")}>mm</button></div></div></div><div className="settings-group calibration-settings"><strong>Tape calibration</strong><p>{calibrated ? "Four orientation-aware rolling distances are saved on this device." : "No complete tape calibration is saved yet."}</p><button className="action-button calibrate-settings-button" onClick={onCalibrate}>Calibrate tape</button>{confirming ? <div className="reset-row"><button className="action-button danger" onClick={() => { onReset(); setConfirming(false); }}>Reset calibration</button><button className="plain-button" onClick={() => setConfirming(false)}>Cancel</button></div> : <button className="plain-button danger-text" onClick={() => setConfirming(true)}>Reset calibration</button>}</div></div></section>;
+  return <section className="settings-screen"><header className="page-header"><button onClick={onBack}>‹ Ruler</button><span>Settings</span></header><div className="settings-card"><h1>Ruler settings</h1><div className="settings-group"><div className="setting-row"><div><strong>Ruler labels</strong><span>Choose inches or millimeters</span></div><div className="segmented-control"><button className={settings.units === "in" ? "selected" : ""} onClick={() => setSetting("units", "in")}>in</button><button className={settings.units === "mm" ? "selected" : ""} onClick={() => setSetting("units", "mm")}>mm</button></div></div><ToggleRow label="Manual rolling" detail="Use the ruler arrows to step forward and back instead of orientation." checked={settings.manualAdvance} onChange={(checked) => setSetting("manualAdvance", checked)} /></div><div className="settings-group calibration-settings"><strong>Tape calibration</strong><p>{calibrated ? "Four orientation-aware rolling distances are saved on this device." : "No complete tape calibration is saved yet."}</p><button className="action-button calibrate-settings-button" onClick={onCalibrate}>Calibrate tape</button>{confirming ? <div className="reset-row"><button className="action-button danger" onClick={() => { onReset(); setConfirming(false); }}>Reset calibration</button><button className="plain-button" onClick={() => setConfirming(false)}>Cancel</button></div> : <button className="plain-button danger-text" onClick={() => setConfirming(true)}>Reset calibration</button>}</div></div></section>;
 }
 
 function ToggleRow({ label, detail, checked, disabled = false, onChange }: { label: string; detail: string; checked: boolean; disabled?: boolean; onChange: (checked: boolean) => void }) {
   return <div className={`setting-row ${disabled ? "disabled" : ""}`}><div><strong>{label}</strong><span>{detail}</span></div><button className={`switch ${checked ? "on" : ""}`} aria-label={label} aria-pressed={checked} disabled={disabled} onClick={() => onChange(!checked)}><span /></button></div>;
 }
 
-function TapeRuler({ offset, scaleMm, units, edge, reversed, draggable, showControls, showEnableHint, motionNotice, onOffset, onDirection, onReset, onEnableMotion }: { offset: number; scaleMm: number; units: "in" | "mm"; edge: TapeEdge; reversed: boolean; draggable: boolean; showControls: boolean; showEnableHint: boolean; motionNotice: string; onOffset: (value: number) => void; onDirection: (reversed: boolean) => void; onReset: () => void; onEnableMotion: () => void | Promise<boolean> }) {
+function TapeRuler({ offset, scaleMm, units, edge, reversed, draggable, showControls, showEnableHint, motionNotice, manualAdvance, onOffset, onDirection, onManualStep, onReset, onEnableMotion }: { offset: number; scaleMm: number; units: "in" | "mm"; edge: TapeEdge; reversed: boolean; draggable: boolean; showControls: boolean; showEnableHint: boolean; motionNotice: string; manualAdvance: boolean; onOffset: (value: number) => void; onDirection: (reversed: boolean) => void; onManualStep: (step: -1 | 1) => void; onReset: () => void; onEnableMotion: () => void | Promise<boolean> }) {
   const drag = useRef<{ pointerId: number; startCoordinate: number; startOffset: number; edge: TapeEdge } | null>(null);
   const pixelsPerUnit = units === "in" ? scaleMm * 25.4 : scaleMm;
   const direction = reversed ? -1 : 1;
@@ -998,7 +1022,7 @@ function TapeRuler({ offset, scaleMm, units, edge, reversed, draggable, showCont
   const readiness = motionNotice;
   return <>
     {showControls && <div className={`tape-control-stage control-orientation-${edge}`}>
-      <div className="tape-controls" aria-label="Ruler direction and zero controls"><button className={!reversed ? "selected" : ""} aria-label="Measure right" onClick={() => onDirection(false)}>→</button><button className="zero-button" onClick={onReset}>0</button><button className={reversed ? "selected" : ""} aria-label="Measure left" onClick={() => onDirection(true)}>←</button></div>
+      <div className={`tape-controls ${manualAdvance ? "manual-controls" : ""}`} aria-label={manualAdvance ? "Manual ruler step controls" : "Ruler direction and zero controls"}>{manualAdvance ? <><button aria-label="Step backward" onClick={() => onManualStep(-1)}>←</button><button className="zero-button" onClick={onReset}>0</button><button aria-label="Step forward" onClick={() => onManualStep(1)}>→</button></> : <><button className={!reversed ? "selected" : ""} aria-label="Measure right" onClick={() => onDirection(false)}>→</button><button className="zero-button" onClick={onReset}>0</button><button className={reversed ? "selected" : ""} aria-label="Measure left" onClick={() => onDirection(true)}>←</button></>}</div>
     </div>}
     <aside className={`tape-ruler edge-${edge} ${showEnableHint ? "is-inactive" : ""}`} aria-label="Construction tape ruler">
       <div className={`tape-viewport ${draggable ? "is-draggable" : ""}`} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}>
