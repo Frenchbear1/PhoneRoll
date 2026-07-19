@@ -195,14 +195,14 @@ const memoryCalculation = (parts: string[], tool: CalcTool) => {
   const units = parsed[0]?.units ?? "in";
   const values = parsed.map((part) => part.valueMm);
   const need = (count: number) => values.length >= count;
-  if (tool === "total") return need(1) ? { label: "Total", value: formatMeasurement(values.reduce((sum, value) => sum + value, 0), units) } : { label: "Total", value: "need 1+" };
-  if (tool === "area") return need(2) ? { label: "Area", value: formatSquareMeasurement(values[0] * values[1], units) } : { label: "Area", value: "need 2" };
-  if (tool === "perimeter") return need(2) ? { label: "Perim.", value: formatMeasurement(2 * (values[0] + values[1]), units) } : { label: "Perim.", value: "need 2" };
-  if (tool === "diagonal") return need(2) ? { label: "Diag.", value: formatMeasurement(Math.hypot(values[0], values[1]), units) } : { label: "Diag.", value: "need 2" };
-  if (tool === "volume") return need(3) ? { label: "Volume", value: formatCubicMeasurement(values[0] * values[1] * values[2], units) } : { label: "Volume", value: "need 3" };
-  if (tool === "spaceDiagonal") return need(3) ? { label: "3D diag.", value: formatMeasurement(Math.hypot(values[0], values[1], values[2]), units) } : { label: "3D diag.", value: "need 3" };
-  if (tool === "circumference") return need(1) ? { label: "Circ.", value: formatMeasurement(values[0] * Math.PI, units) } : { label: "Circ.", value: "need 1" };
-  if (tool === "diameter") return need(1) ? { label: "Diam.", value: formatMeasurement(values[0] / Math.PI, units) } : { label: "Diam.", value: "need 1" };
+  if (tool === "total") return need(1) ? { label: "Total", value: formatMeasurement(values.reduce((sum, value) => sum + value, 0), units) } : null;
+  if (tool === "area") return need(2) ? { label: "Area", value: formatSquareMeasurement(values[0] * values[1], units) } : null;
+  if (tool === "perimeter") return need(2) ? { label: "Perim.", value: formatMeasurement(2 * (values[0] + values[1]), units) } : null;
+  if (tool === "diagonal") return need(2) ? { label: "Diag.", value: formatMeasurement(Math.hypot(values[0], values[1]), units) } : null;
+  if (tool === "volume") return need(3) ? { label: "Volume", value: formatCubicMeasurement(values[0] * values[1] * values[2], units) } : null;
+  if (tool === "spaceDiagonal") return need(3) ? { label: "3D diag.", value: formatMeasurement(Math.hypot(values[0], values[1], values[2]), units) } : null;
+  if (tool === "circumference") return need(1) ? { label: "Circ.", value: formatMeasurement(values[0] * Math.PI, units) } : null;
+  if (tool === "diameter") return need(1) ? { label: "Diam.", value: formatMeasurement(values[0] / Math.PI, units) } : null;
   return null;
 };
 
@@ -917,17 +917,17 @@ function MemoryScreen({ entries, onDelete, onBack }: { entries: MemoryEntry[]; o
     <header className={`page-header memory-header ${selecting ? "selecting" : ""}`}>
       <button onClick={onBack}>‹ Ruler</button>
       {selecting && <button className="delete-memory-button" disabled={!selectedIds.length} onClick={deleteSelected}>Delete</button>}
-      {entries.length > 0 && !selecting && <label className="split-control header-split-control" aria-label="Memory splits"><select value={splitDivisor} onChange={(event) => setSplitDivisor(Number(event.target.value))}><option value={0}>Splits</option>{Array.from({ length: 19 }, (_, index) => index + 2).map((value) => <option value={value} key={value}>{splitLabel(value)}</option>)}</select></label>}
       <span>Memory</span>
     </header>
     <div className="memory-card">
       <div className="memory-title-row">
         {selecting ? <button className="memory-title-back" onClick={leaveSelection}>‹ Back</button> : <h1>Saved measurements</h1>}
-        {entries.length > 0 && <div className="memory-title-actions">
-          {!selecting && <label className="calc-control" aria-label="Memory tools"><select value={calcTool} onChange={(event) => setCalcTool(event.target.value as CalcTool)}>{calcToolOptions.map((tool) => <option value={tool} key={tool}>{calcToolLabel(tool)}</option>)}</select></label>}
-          <button className="memory-select-button" onClick={selecting ? selectAll : () => setSelecting(true)}>{selecting ? (allSelected ? "Clear all" : "Select all") : "Select"}</button>
-        </div>}
+        {entries.length > 0 && <button className="memory-select-button" onClick={selecting ? selectAll : () => setSelecting(true)}>{selecting ? (allSelected ? "Clear all" : "Select all") : "Select"}</button>}
       </div>
+      {entries.length > 0 && !selecting && <div className="memory-tools-row">
+        <label className="split-control" aria-label="Memory splits"><select value={splitDivisor} onChange={(event) => setSplitDivisor(Number(event.target.value))}><option value={0}>Splits</option>{Array.from({ length: 19 }, (_, index) => index + 2).map((value) => <option value={value} key={value}>{splitLabel(value)}</option>)}</select></label>
+        <label className="calc-control" aria-label="Memory tools"><select value={calcTool} onChange={(event) => setCalcTool(event.target.value as CalcTool)}>{calcToolOptions.map((tool) => <option value={tool} key={tool}>{calcToolLabel(tool)}</option>)}</select></label>
+      </div>}
       {entries.length === 0 ? <p className="empty-memory">Hold on the ruler, then save a reading here.</p> : <div className={`memory-list ${selecting ? "is-selecting" : ""}`}>{entries.map((entry) => {
         const selected = selectedIds.includes(entry.id);
         const splitParts = splitDivisor ? entry.parts.map((part) => divideMeasurementLabel(part, splitDivisor)) : [];
