@@ -5,6 +5,7 @@ import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from
 
 type Screen = "measure" | "calibration" | "settings";
 type Orientation = "face_up" | "face_down" | "top_edge" | "bottom_edge" | "left_edge" | "right_edge" | "unknown";
+type TapeEdge = "bottom" | "right" | "top" | "left";
 type EngineState = "idle" | "arming" | "ready" | "moving" | "cooldown";
 type CalibrationPhase = "scale" | "start" | "rolling" | "complete";
 type Vec = { x: number; y: number; z: number };
@@ -20,6 +21,7 @@ type CalibrationRuntime = {
   orientationOrder: Orientation[];
   pending: QuarterTurn | null;
   predictedMm: number | null;
+  lastOrientation: Orientation;
 };
 
 const STORE = {
@@ -51,7 +53,7 @@ const dot = (a: Vec, b: Vec) => a.x * b.x + a.y * b.y + a.z * b.z;
 const cross = (a: Vec, b: Vec): Vec => ({ x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x });
 const safeNumber = (value: number | null | undefined) => Number.isFinite(value) ? Number(value) : 0;
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
-const emptyRuntime = (): CalibrationRuntime => ({ lastAlignment: 0, turnCount: 0, draftValues: [null, null, null, null], orientationOrder: [], pending: null, predictedMm: null });
+const emptyRuntime = (): CalibrationRuntime => ({ lastAlignment: 0, turnCount: 0, draftValues: [null, null, null, null], orientationOrder: [], pending: null, predictedMm: null, lastOrientation: "unknown" });
 
 const orientationFromGravity = (vector: Vec): Orientation => {
   const v = normalize(vector);
@@ -73,6 +75,7 @@ const orientationName = (orientation: Orientation) => ({
   right_edge: "right edge",
   unknown: "waiting for orientation",
 }[orientation]);
+const tapeEdgeForOrientation = (orientation: Orientation): TapeEdge => ({ bottom_edge: "bottom", right_edge: "right", top_edge: "top", left_edge: "left", face_up: "bottom", face_down: "top", unknown: "bottom" }[orientation]);
 
 const loadJSON = <T,>(key: string, fallback: T): T => {
   try {
@@ -233,6 +236,7 @@ export default function Home() {
   const screenRef = useRef(screen);
   const calibrationPhaseRef = useRef(calibrationPhase);
   const detectedOrientationRef = useRef(detectedOrientation);
+  const orientationStableSince = useRef(0);
   const calibrationRuntime = useRef<CalibrationRuntime>(emptyRuntime());
   const settingsRef = useRef(settings);
   const audioContext = useRef<AudioContext | null>(null);
@@ -292,33 +296,13 @@ export default function Home() {
       const sample: MotionSample = { gravity, acceleration, rotation, orientation: orientationFromGravity(gravity), gravityMagnitude: magnitude(gravity), at: event.timeStamp || performance.now() };
       if (detectedOrientationRef.current !== sample.orientation) {
         detectedOrientationRef.current = sample.orientation;
+        orientationStableSince.current = sample.at;
         setDetectedOrientation(sample.orientation);
       }
+      if (screenRef.current === "calibration" && calibrationPhaseRef.current === "rolling") return;
       const turn = detector.current.update(sample);
       if (!turn) return;
       confirmFlip();
-
-      if (screenRef.current === "calibration" && calibrationPhaseRef.current === "rolling") {
-        const runtime = calibrationRuntime.current;
-        if (runtime.pending) return;
-        const index = runtime.turnCount % 4;
-        const estimate = runtime.draftValues[index] ?? (runtime.turnCount >= 2 ? runtime.draftValues[index % 2] : null);
-        runtime.pending = turn;
-        runtime.predictedMm = estimate;
-        runtime.orientationOrder[index] = turn.from;
-        runtime.orientationOrder[(index + 1) % 4] = turn.to;
-        if (estimate) {
-          const movement = estimate * rulerScaleRef.current;
-          setTapeOffset((current) => current + (reversedRef.current ? movement : -movement));
-          setPredictedDistance(estimate);
-          setCalibrationNotice("Predicted the next mark from the matching edge. Nudge the tape only if it needs it.");
-        } else {
-          setPredictedDistance(null);
-          setCalibrationNotice("No estimate yet—drag the tape to the matching mark, then save this alignment.");
-        }
-        detector.current.stop();
-        return;
-      }
 
       const saved = calibrationRef.current;
       if (saved.some((value) => value <= 0)) return;
@@ -413,53 +397,50 @@ export default function Home() {
       setCalibrationNotice("Hold the phone upright and still until its orientation appears below.");
       return;
     }
-    calibrationRuntime.current = { ...emptyRuntime(), lastAlignment: tapeOffset, orientationOrder: [startOrientation] };
+    calibrationRuntime.current = { ...emptyRuntime(), lastAlignment: tapeOffset, orientationOrder: [startOrientation], lastOrientation: startOrientation };
     zeroAlignmentRef.current = tapeOffset;
     setZeroAlignment(tapeOffset);
     setCalibrationTurns(0);
     setPredictedDistance(null);
     setCalibrationNotice("");
     setCalibrationPhase("rolling");
-    detector.current.reset();
+    detector.current.stop();
   };
   const saveAlignment = () => {
     const runtime = calibrationRuntime.current;
-    if (!runtime.pending) {
-      setCalibrationNotice("Roll one quarter turn and wait for PhoneRoll to settle before saving.");
+    const nextOrientation = detectedOrientationRef.current;
+    if (nextOrientation === "unknown") {
+      setCalibrationNotice("Hold the phone still until PhoneRoll can identify the new edge.");
+      return;
+    }
+    if (nextOrientation === runtime.lastOrientation) {
+      setCalibrationNotice("Rotate one quarter turn first. The detected edge has not changed yet.");
+      return;
+    }
+    if (performance.now() - orientationStableSince.current < 240) {
+      setCalibrationNotice("Hold this edge still for a moment, then save the alignment.");
       return;
     }
     const distanceMm = Math.abs(tapeOffset - runtime.lastAlignment) / rulerScale;
-    if (distanceMm < 8) {
+    if (distanceMm < 3) {
       setCalibrationNotice("Drag the tape to the new matching mark before saving this alignment.");
       return;
     }
     const index = runtime.turnCount % 4;
     runtime.draftValues[index] = distanceMm;
     runtime.lastAlignment = tapeOffset;
+    runtime.lastOrientation = nextOrientation;
+    runtime.orientationOrder[(index + 1) % 4] = nextOrientation;
     runtime.turnCount += 1;
-    runtime.pending = null;
-    runtime.predictedMm = null;
     setPredictedDistance(null);
     setCalibrationTurns(runtime.turnCount);
-    setCalibrationNotice("");
-    detector.current.reset();
-  };
-  const finishCalibration = () => {
-    const runtime = calibrationRuntime.current;
-    if (!runtime.pending || runtime.predictedMm === null) {
-      setCalibrationNotice("Keep rolling until PhoneRoll predicts the next alignment, then confirm it is right.");
+    if (runtime.turnCount < 4) {
+      setCalibrationNotice("");
       return;
     }
-    const distanceMm = Math.abs(tapeOffset - runtime.lastAlignment) / rulerScale;
-    if (distanceMm < 8) {
-      setCalibrationNotice("The tape needs a new matching mark before it can be confirmed.");
-      return;
-    }
-    const index = runtime.turnCount % 4;
-    runtime.draftValues[index] = distanceMm;
-    const values = runtime.draftValues.map((value, itemIndex) => value ?? runtime.draftValues[itemIndex % 2] ?? 0);
-    if (values.some((value) => value <= 8) || runtime.orientationOrder.length !== 4) {
-      setCalibrationNotice("Keep rolling once more so PhoneRoll can identify every orientation.");
+    const values = runtime.draftValues.map((value) => value ?? 0);
+    if (values.some((value) => value <= 3) || runtime.orientationOrder.length !== 4) {
+      setCalibrationNotice("One of the four sides is still missing. Rotate once more and save it.");
       return;
     }
     setCalibration(values);
@@ -478,10 +459,11 @@ export default function Home() {
     calibrationRuntime.current = emptyRuntime();
     setCalibrationNotice("");
   };
-  const sharedTape = (draggable: boolean) => <TapeRuler
+  const sharedTape = (draggable: boolean, edge: TapeEdge = "bottom") => <TapeRuler
     offset={tapeOffset}
     scaleMm={rulerScale}
     units={settings.units}
+    edge={edge}
     reversed={reversed}
     draggable={draggable}
     showEnableHint={screen === "measure" && !motionEnabled}
@@ -495,7 +477,7 @@ export default function Home() {
 
   return <main className="app-shell">
     {screen === "measure" && <MeasureScreen menuOpen={menuOpen} onMenu={() => setMenuOpen((open) => !open)} onCalibrate={openCalibration} onSettings={openSettings}>{sharedTape(false)}</MeasureScreen>}
-    {screen === "calibration" && <CalibrationScreen phase={calibrationPhase} detectedOrientation={detectedOrientation} turns={calibrationTurns} predictedDistance={predictedDistance} notice={calibrationNotice} rulerScale={rulerScale} reversed={reversed} onScale={(value) => setRulerScale(clamp(value, 2.5, 10))} onSaveScale={saveScale} onCaptureStart={captureStart} onSaveAlignment={saveAlignment} onConfirmPrediction={finishCalibration} onBack={() => setScreen("measure")} onFinish={() => setScreen("measure")}>{sharedTape(true)}</CalibrationScreen>}
+    {screen === "calibration" && <CalibrationScreen phase={calibrationPhase} detectedOrientation={detectedOrientation} turns={calibrationTurns} notice={calibrationNotice} rulerScale={rulerScale} reversed={reversed} onScale={(value) => setRulerScale(clamp(value, 2.5, 10))} onSaveScale={saveScale} onCaptureStart={captureStart} onSaveAlignment={saveAlignment} onBack={() => setScreen("measure")} onFinish={() => setScreen("measure")}>{sharedTape(true, tapeEdgeForOrientation(detectedOrientation))}</CalibrationScreen>}
     {screen === "settings" && <SettingsScreen calibrated={calibration.every((value) => value > 0)} settings={settings} onChangeSettings={setSettings} onReset={resetCalibration} onBack={() => setScreen("measure")} />}
   </main>;
 }
@@ -508,19 +490,21 @@ function MeasureScreen({ menuOpen, onMenu, onCalibrate, onSettings, children }: 
   </section>;
 }
 
-function CalibrationScreen({ phase, detectedOrientation, turns, predictedDistance, notice, rulerScale, reversed, onScale, onSaveScale, onCaptureStart, onSaveAlignment, onConfirmPrediction, onBack, onFinish, children }: {
-  phase: CalibrationPhase; detectedOrientation: Orientation; turns: number; predictedDistance: number | null; notice: string; rulerScale: number; reversed: boolean; onScale: (value: number) => void; onSaveScale: () => void; onCaptureStart: () => void; onSaveAlignment: () => void; onConfirmPrediction: () => void; onBack: () => void; onFinish: () => void; children: ReactNode;
+function CalibrationScreen({ phase, detectedOrientation, turns, notice, rulerScale, reversed, onScale, onSaveScale, onCaptureStart, onSaveAlignment, onBack, onFinish, children }: {
+  phase: CalibrationPhase; detectedOrientation: Orientation; turns: number; notice: string; rulerScale: number; reversed: boolean; onScale: (value: number) => void; onSaveScale: () => void; onCaptureStart: () => void; onSaveAlignment: () => void; onBack: () => void; onFinish: () => void; children: ReactNode;
 }) {
-  const readyForFinish = predictedDistance !== null;
   const status = phase === "rolling"
-    ? <div className="calibration-status"><span>Orientation</span><strong>{orientationName(detectedOrientation)}</strong>{predictedDistance !== null && <><span>Next estimate</span><strong>{(predictedDistance / 25.4).toFixed(3)} in</strong></>}</div>
+    ? <div className="calibration-status"><span>Detected edge</span><strong>{orientationName(detectedOrientation)}</strong><span>Saved sides</span><strong>{turns} of 4</strong></div>
     : null;
-  const steps = {
+  const readyForFinish = false;
+  const onConfirmPrediction = () => undefined;
+  let steps = {
     scale: <><p className="step-count">Step 1 of 3</p><h1>Match the tape to a real tape measure.</h1><p>Adjust the scale until the inch and fraction marks on the yellow tape line up with your real tape. The slider only changes its physical size.</p><input className="scale-slider" aria-label="Tape scale" type="range" min="2.5" max="10" step="0.01" value={rulerScale} onChange={(event) => onScale(Number(event.target.value))} /><button className="action-button" onClick={onSaveScale}>Save tape size</button></>,
     start: <><p className="step-count">Step 2 of 3</p><h1>Start upright with the left side at zero.</h1><p>Stand the phone upright on the real tape measure with its left side at the 0 mark. Drag the yellow tape so the same mark lines up, then lock this first orientation.</p><div className="orientation-readout"><span>Detected orientation</span><strong>{orientationName(detectedOrientation)}</strong></div><button className="action-button" onClick={onCaptureStart}>Lock starting alignment</button></>,
     rolling: <><p className="step-count">Step 3 of 3 · roll, align, repeat</p><h1>{readyForFinish ? "Was the prediction right?" : "Roll once, then align the tape."}</h1><p>{readyForFinish ? "If the yellow tape is already on the right mark, finish calibration. Otherwise nudge it, save the corrected alignment, and keep rolling." : `Roll one quarter turn ${reversed ? "to the left" : "to the right"}. Drag the yellow tape to the real tape’s matching mark. After two saved rolls, PhoneRoll will predict the next one.`}</p>{status}</>,
     complete: <><p className="step-count">Calibration complete</p><h1>The tape is ready to roll.</h1><p>PhoneRoll saved four orientation-aware rolling distances. Back on the ruler, use the left or right arrow to choose direction, or reset it to zero before measuring.</p><button className="action-button" onClick={onFinish}>Use the tape</button></>,
   };
+  steps = { ...steps, rolling: <><p className="step-count">Step 3 of 3 · side {Math.min(turns + 1, 4)} of 4</p><h1>Rotate once, align, then save.</h1><p>Roll one quarter turn {reversed ? "to the left" : "to the right"}. PhoneRoll follows the detected edge, including the upside-down side. Align the tape to the real ruler, then save this side.</p>{status}</> };
   return <section className="calibration-screen"><header className="page-header"><button onClick={onBack}>‹ Ruler</button><span>Calibration</span></header><div className="calibration-card">{steps[phase]}{notice && <p className="calibration-notice">{notice}</p>}</div>{phase === "rolling" && <div className="calibration-float"><div className="corner-progress continuous-progress" aria-label="Calibration roll progress">{Array.from({ length: 4 }, (_, index) => <span className={index < Math.min(turns, 4) ? "saved" : index === turns % 4 ? "active" : ""} key={index}>{index + 1}</span>)}</div><div className="alignment-actions"><button className="plain-button" onClick={onSaveAlignment}>Save alignment &amp; roll again</button>{readyForFinish && <button className="action-button" onClick={onConfirmPrediction}>Looks right — finish</button>}</div></div>}{children}</section>;
 }
 
@@ -535,7 +519,7 @@ function ToggleRow({ label, detail, checked, disabled = false, onChange }: { lab
   return <div className={`setting-row ${disabled ? "disabled" : ""}`}><div><strong>{label}</strong><span>{detail}</span></div><button className={`switch ${checked ? "on" : ""}`} aria-label={label} aria-pressed={checked} disabled={disabled} onClick={() => onChange(!checked)}><span /></button></div>;
 }
 
-function TapeRuler({ offset, scaleMm, units, reversed, draggable, showEnableHint, calibrationReady, motionNotice, onOffset, onDirection, onReset, onEnableMotion }: { offset: number; scaleMm: number; units: "in" | "mm"; reversed: boolean; draggable: boolean; showEnableHint: boolean; calibrationReady: boolean; motionNotice: string; onOffset: (value: number) => void; onDirection: (reversed: boolean) => void; onReset: () => void; onEnableMotion: () => void | Promise<boolean> }) {
+function TapeRuler({ offset, scaleMm, units, edge, reversed, draggable, showEnableHint, calibrationReady, motionNotice, onOffset, onDirection, onReset, onEnableMotion }: { offset: number; scaleMm: number; units: "in" | "mm"; edge: TapeEdge; reversed: boolean; draggable: boolean; showEnableHint: boolean; calibrationReady: boolean; motionNotice: string; onOffset: (value: number) => void; onDirection: (reversed: boolean) => void; onReset: () => void; onEnableMotion: () => void | Promise<boolean> }) {
   const drag = useRef<{ pointerId: number; startX: number; startOffset: number } | null>(null);
   const pixelsPerUnit = units === "in" ? scaleMm * 25.4 : scaleMm;
   const direction = reversed ? -1 : 1;
@@ -554,7 +538,7 @@ function TapeRuler({ offset, scaleMm, units, reversed, draggable, showEnableHint
     if (drag.current?.pointerId === event.pointerId) drag.current = null;
   };
   const readiness = motionNotice || (calibrationReady ? "" : "Calibration needed before rolling can measure.");
-  return <aside className={`tape-ruler ${showEnableHint ? "is-inactive" : ""}`} aria-label="Construction tape ruler">
+  return <aside className={`tape-ruler edge-${edge} ${showEnableHint ? "is-inactive" : ""}`} aria-label="Construction tape ruler">
     <div className="tape-controls" aria-label="Ruler direction and zero controls"><button className={!reversed ? "selected" : ""} aria-label="Measure right" onClick={() => onDirection(false)}>→</button><button className="zero-button" onClick={onReset}>0</button><button className={reversed ? "selected" : ""} aria-label="Measure left" onClick={() => onDirection(true)}>←</button></div>
     <div className={`tape-viewport ${draggable ? "is-draggable" : ""}`} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}>
       {showEnableHint && <button className="motion-hint" onClick={() => void onEnableMotion()}>Tap to enable rolling</button>}
