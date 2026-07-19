@@ -34,17 +34,6 @@ const STORE = {
   settings: "phoneroll.settings.v1",
   memory: "phoneroll.measurement-memory.v1",
 };
-const TAPE_INCHES = 60;
-const TAPE_TICKS = Array.from({ length: TAPE_INCHES * 16 + 1 }, (_, division) => ({
-  division,
-  inch: Math.floor(division / 16),
-  fraction: division % 16,
-}));
-const METRIC_TICKS = Array.from({ length: 1501 }, (_, millimeter) => ({
-  millimeter,
-  centimeter: Math.floor(millimeter / 10),
-  remainder: millimeter % 10,
-}));
 const DEFAULT_SETTINGS: UserSettings = { units: "in", sound: false };
 
 const blank = (): Vec => ({ x: 0, y: 0, z: 0 });
@@ -91,6 +80,42 @@ const orientationFromAngles = (beta: number | null, gamma: number | null): Orien
 const tapeSpanForEdge = (edge: TapeEdge) => {
   if (typeof window === "undefined") return edge === "left" || edge === "right" ? 844 : 390;
   return edge === "left" || edge === "right" ? window.innerHeight : window.innerWidth;
+};
+const visibleDistanceRange = (offset: number, direction: number, pixelsPerUnit: number, span: number) => {
+  const pad = Math.max(220, pixelsPerUnit * 3);
+  const minPixel = -pad;
+  const maxPixel = span + pad;
+  const low = direction === 1 ? (minPixel - offset) / pixelsPerUnit : (offset - maxPixel) / pixelsPerUnit;
+  const high = direction === 1 ? (maxPixel - offset) / pixelsPerUnit : (offset - minPixel) / pixelsPerUnit;
+  return { low: Math.max(0, low), high: Math.max(0, high) };
+};
+const buildImperialTicks = (offset: number, direction: number, pixelsPerInch: number, span: number) => {
+  const { low, high } = visibleDistanceRange(offset, direction, pixelsPerInch, span);
+  const start = Math.max(0, Math.floor(low * 16) - 3);
+  const end = Math.ceil(high * 16) + 3;
+  return Array.from({ length: Math.max(0, end - start + 1) }, (_, index) => {
+    const division = start + index;
+    return {
+      division,
+      x: offset + direction * (division / 16) * pixelsPerInch,
+      inch: Math.floor(division / 16),
+      fraction: division % 16,
+    };
+  });
+};
+const buildMetricTicks = (offset: number, direction: number, pixelsPerMillimeter: number, span: number) => {
+  const { low, high } = visibleDistanceRange(offset, direction, pixelsPerMillimeter, span);
+  const start = Math.max(0, Math.floor(low) - 10);
+  const end = Math.ceil(high) + 10;
+  return Array.from({ length: Math.max(0, end - start + 1) }, (_, index) => {
+    const millimeter = start + index;
+    return {
+      millimeter,
+      x: offset + direction * millimeter * pixelsPerMillimeter,
+      centimeter: Math.floor(millimeter / 10),
+      remainder: millimeter % 10,
+    };
+  });
 };
 const savedRollOrder = (order: Orientation[]) => {
   const usable = order.length === 4 && order.every((orientation) => DEFAULT_ROLL_ORDER.includes(orientation));
@@ -367,13 +392,12 @@ export default function Home() {
     }
     const forward = toIndex === (fromIndex + 1) % 4;
     const backward = toIndex === (fromIndex + 3) % 4;
-    const expectedDirection = reversedRef.current ? backward : forward;
-    if (!expectedDirection || at - homeRoll.current.acceptedAt < 280) {
+    if ((!forward && !backward) || at - homeRoll.current.acceptedAt < 280) {
       homeRoll.current.orientation = nextOrientation;
       return;
     }
     const distanceMm = forward ? saved[fromIndex] : saved[toIndex];
-    setTapeOffset((current) => current + (reversedRef.current ? distanceMm : -distanceMm) * rulerScaleRef.current);
+    setTapeOffset((current) => current + (forward ? -distanceMm : distanceMm) * rulerScaleRef.current);
     homeRoll.current = { orientation: nextOrientation, acceptedAt: at };
     confirmFlip();
   };
@@ -412,17 +436,22 @@ export default function Home() {
   const enableMotion = async () => {
     if (motionEnabledRef.current) {
       primeSound();
-      setMotionNotice(calibrationRef.current.some((value) => value <= 0) ? "Motion is on. Calibrate the tape before it can measure." : "Rolling is on.");
+      setMotionNotice("");
       return true;
     }
     try {
-      const motion = DeviceMotionEvent as unknown as ApplePermissionEvent;
-      const orientation = DeviceOrientationEvent as unknown as ApplePermissionEvent;
-      const requested = [motion, orientation].filter((event) => typeof event.requestPermission === "function");
-      if (requested.length) {
-        const decisions = await Promise.all(requested.map((event) => event.requestPermission?.()));
-        if (decisions.some((decision) => decision !== "granted")) {
-          setMotionNotice("Motion permission was not enabled. Tap again and allow it.");
+      const motion = typeof DeviceMotionEvent === "undefined" ? null : DeviceMotionEvent as unknown as ApplePermissionEvent;
+      const orientation = typeof DeviceOrientationEvent === "undefined" ? null : DeviceOrientationEvent as unknown as ApplePermissionEvent;
+      if (!motion && !orientation) {
+        setMotionNotice("Motion sensors are not available in this browser.");
+        return false;
+      }
+      setMotionNotice("");
+      const requested = [motion, orientation].filter((event): event is ApplePermissionEvent => Boolean(event) && typeof event.requestPermission === "function");
+      for (const event of requested) {
+        const decision = await event.requestPermission?.();
+        if (decision !== "granted") {
+          setMotionNotice("Motion permission was not enabled. Tap Enable rolling and choose Allow.");
           return false;
         }
       }
@@ -431,10 +460,10 @@ export default function Home() {
       motionEnabledRef.current = true;
       setMotionEnabled(true);
       primeSound();
-      setMotionNotice(calibrationRef.current.some((value) => value <= 0) ? "Motion is on. Calibrate the tape before it can measure." : "Rolling is on.");
+      setMotionNotice("");
       return true;
     } catch {
-      setMotionNotice("Motion could not be enabled in this browser.");
+      setMotionNotice("Motion permission was not enabled. Tap Enable rolling and choose Allow.");
       return false;
     }
   };
@@ -588,21 +617,28 @@ export default function Home() {
       setCalibrationNotice("Hold this edge still for a moment, then save the alignment.");
       return;
     }
-    const distanceMm = Math.abs(tapeOffset - runtime.lastAlignment) / rulerScale;
+    const previousAlignment = runtime.lastAlignment;
+    const savedAlignment = tapeOffset;
+    const distancePx = Math.abs(savedAlignment - previousAlignment);
+    const distanceMm = distancePx / rulerScale;
     if (distanceMm < 3) {
       setCalibrationNotice("Drag the tape to the new matching mark before saving this alignment.");
       return;
     }
     const index = runtime.turnCount % 4;
     runtime.draftValues[index] = distanceMm;
-    runtime.lastAlignment = tapeOffset;
+    runtime.lastAlignment = savedAlignment;
     runtime.lastOrientation = nextOrientation;
     runtime.orientationOrder[(index + 1) % 4] = nextOrientation;
     runtime.turnCount += 1;
-    setPredictedDistance(null);
     setCalibrationTurns(runtime.turnCount);
     if (runtime.turnCount < 4) {
-      setCalibrationNotice("");
+      const nextIndex = runtime.turnCount % 4;
+      const nextGuessMm = runtime.draftValues[(nextIndex + 2) % 4] ?? distanceMm;
+      const stepDirection = Math.sign(savedAlignment - previousAlignment) || -1;
+      setPredictedDistance(nextGuessMm);
+      setTapeOffset(savedAlignment + stepDirection * nextGuessMm * rulerScale);
+      setCalibrationNotice("Jumped to the next likely mark. Fine tune it after the next roll, then save.");
       return;
     }
     const values = runtime.draftValues.map((value) => value ?? 0);
@@ -612,6 +648,7 @@ export default function Home() {
     }
     setCalibration(values);
     setCalibrationOrder(runtime.orientationOrder);
+    setPredictedDistance(null);
     setCalibrationNotice("");
     setCalibrationPhase("complete");
     detector.current.stop();
@@ -650,7 +687,7 @@ export default function Home() {
 
   const measureEdge = tapeEdgeForOrientation(detectedOrientation);
 
-  return <main className="app-shell" onPointerDownCapture={() => { void enableMotion(); }}>
+  return <main className="app-shell">
     {screen === "measure" && <MeasureScreen calibrated={calibration.every((value) => value > 0)} edge={measureEdge} motionEnabled={motionEnabled} motionNotice={motionNotice} precisionReading={precisionReading} precisionFrozen={precisionFrozen} draftMeasurements={draftMeasurements} onPrecisionPoint={capturePrecisionReading} onPrecisionFreeze={freezePrecisionReading} onPrecisionDismiss={dismissPrecisionReading} onSaveMeasurement={saveMemoryReading} onAddMeasurementPart={addMemoryPart} onEnableMotion={enableMotion} onMemory={openMemory} onSettings={openSettings}>{sharedTape(false, measureEdge)}</MeasureScreen>}
     {screen === "calibration" && <CalibrationScreen phase={calibrationPhase} detectedOrientation={detectedOrientation} turns={calibrationTurns} notice={calibrationNotice} rulerScale={rulerScale} onScale={(value) => setRulerScale(clamp(value, 2.5, 10))} onSaveScale={saveScale} onCaptureStart={captureStart} onSaveAlignment={saveAlignment} onBack={goToMeasure} onFinish={goToMeasure}>{sharedTape(true, calibrationPhase === "rolling" ? tapeEdgeForOrientation(detectedOrientation) : "bottom", false, false)}</CalibrationScreen>}
     {screen === "settings" && <SettingsScreen calibrated={calibration.every((value) => value > 0)} settings={settings} onChangeSettings={updateSettings} onReset={resetCalibration} onCalibrate={openCalibration} onBack={goToMeasure} />}
@@ -840,6 +877,9 @@ function TapeRuler({ offset, scaleMm, units, edge, reversed, draggable, showCont
   const drag = useRef<{ pointerId: number; startCoordinate: number; startOffset: number; edge: TapeEdge } | null>(null);
   const pixelsPerUnit = units === "in" ? scaleMm * 25.4 : scaleMm;
   const direction = reversed ? -1 : 1;
+  const tapeSpan = tapeSpanForEdge(edge);
+  const imperialTicks = units === "in" ? buildImperialTicks(offset, direction, pixelsPerUnit, tapeSpan) : [];
+  const metricTicks = units === "mm" ? buildMetricTicks(offset, direction, pixelsPerUnit, tapeSpan) : [];
   const dragCoordinate = (event: ReactPointerEvent<HTMLDivElement>, tapeEdge: TapeEdge) => {
     if (tapeEdge === "top") return -event.clientX;
     if (tapeEdge === "right") return -event.clientY;
@@ -848,7 +888,6 @@ function TapeRuler({ offset, scaleMm, units, edge, reversed, draggable, showCont
   };
   const startDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     if ((event.target as HTMLElement).closest("button")) return;
-    void onEnableMotion();
     if (!draggable) return;
     drag.current = { pointerId: event.pointerId, startCoordinate: dragCoordinate(event, edge), startOffset: offset, edge };
     event.currentTarget.setPointerCapture(event.pointerId);
@@ -870,8 +909,8 @@ function TapeRuler({ offset, scaleMm, units, edge, reversed, draggable, showCont
         {showEnableHint && <button className="motion-hint" onClick={() => void onEnableMotion()}>Tap to enable rolling</button>}
         {readiness && <span className="motion-status">{readiness}</span>}
         {units === "in"
-          ? TAPE_TICKS.map(({ division, inch, fraction }) => <TapeTick key={division} x={offset + direction * (division / 16) * pixelsPerUnit} inch={inch} fraction={fraction} />)
-          : METRIC_TICKS.map(({ millimeter, centimeter, remainder }) => <MetricTick key={millimeter} x={offset + direction * millimeter * pixelsPerUnit} centimeter={centimeter} remainder={remainder} />)}
+          ? imperialTicks.map(({ division, x, inch, fraction }) => <TapeTick key={division} x={x} inch={inch} fraction={fraction} />)
+          : metricTicks.map(({ millimeter, x, centimeter, remainder }) => <MetricTick key={millimeter} x={x} centimeter={centimeter} remainder={remainder} />)}
       </div>
     </aside>
   </>;
