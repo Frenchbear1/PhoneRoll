@@ -700,7 +700,7 @@ function MeasureScreen({ calibrated, edge, motionEnabled, motionNotice, precisio
     {precisionReading && <div className={`precision-line precision-line-${precisionReading.edge}`} style={lineStyle} aria-hidden="true" />}
     {precisionReading && <div className="precision-readout" role="status" aria-live="polite">
       {pending && <span className="precision-pending">{pending} x</span>}
-      <strong>{precisionReading.label}</strong>
+      <strong><MeasurementText label={precisionReading.label} /></strong>
       <div className="precision-actions">
         <button onClick={onAddMeasurementPart}>By</button>
         <button onClick={onSaveMeasurement}>Save</button>
@@ -743,7 +743,18 @@ function CalibrationScreen({ phase, detectedOrientation, turns, notice, rulerSca
 }
 
 function MemoryScreen({ entries, onBack }: { entries: MemoryEntry[]; onBack: () => void }) {
-  return <section className="memory-screen"><header className="page-header"><button onClick={onBack}>‹ Ruler</button><span>Memory</span></header><div className="memory-card"><h1>Saved measurements</h1>{entries.length === 0 ? <p className="empty-memory">Hold on the ruler, then save a reading here.</p> : <div className="memory-list">{entries.map((entry) => <div className="memory-row" key={entry.id}><strong>{entry.parts.join(" x ")}</strong><span>{new Date(entry.savedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span></div>)}</div>}</div></section>;
+  return <section className="memory-screen"><header className="page-header"><button onClick={onBack}>‹ Ruler</button><span>Memory</span></header><div className="memory-card"><h1>Saved measurements</h1>{entries.length === 0 ? <p className="empty-memory">Hold on the ruler, then save a reading here.</p> : <div className="memory-list">{entries.map((entry) => <div className="memory-row" key={entry.id}><strong>{entry.parts.map((part, index) => <span className="memory-part" key={`${entry.id}-${index}`}><MeasurementText label={part} compact />{index < entry.parts.length - 1 && <em>x</em>}</span>)}</strong><span>{new Date(entry.savedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span></div>)}</div>}</div></section>;
+}
+
+function MeasurementText({ label, compact = false }: { label: string; compact?: boolean }) {
+  const inchMatch = label.match(/^(\d+)?(?:\s+)?(?:(\d+)\/(\d+))?\s+in$/);
+  if (!inchMatch) return <span className={`measurement-text ${compact ? "compact" : ""}`}>{label}</span>;
+  const [, whole, numerator, denominator] = inchMatch;
+  return <span className={`measurement-text inch-format ${compact ? "compact" : ""}`}>
+    {whole && <span className="whole-number">{whole}</span>}
+    {numerator && denominator && <span className="stacked-fraction"><span>{numerator}</span><span>{denominator}</span></span>}
+    <span className="unit-label">in</span>
+  </span>;
 }
 
 function SettingsScreen({ calibrated, settings, onChangeSettings, onReset, onBack }: { calibrated: boolean; settings: UserSettings; onChangeSettings: (settings: UserSettings) => void; onReset: () => void; onBack: () => void }) {
