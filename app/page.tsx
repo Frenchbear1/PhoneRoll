@@ -219,6 +219,7 @@ export default function Home() {
   const [calibrationTurns, setCalibrationTurns] = useState(0);
   const [predictedDistance, setPredictedDistance] = useState<number | null>(null);
   const [calibrationNotice, setCalibrationNotice] = useState("");
+  const [motionNotice, setMotionNotice] = useState("");
 
   const detector = useRef(new QuarterTurnEngine());
   const calibrationRef = useRef(calibration);
@@ -334,6 +335,7 @@ export default function Home() {
     };
     if (motionEnabledRef.current) {
       primeSound();
+      setMotionNotice(calibrationRef.current.some((value) => value <= 0) ? "Motion is on. Calibrate the tape before it can measure." : "Rolling is on.");
       return true;
     }
     try {
@@ -342,14 +344,19 @@ export default function Home() {
       const requested = [motion, orientation].filter((event) => typeof event.requestPermission === "function");
       if (requested.length) {
         const decisions = await Promise.all(requested.map((event) => event.requestPermission?.()));
-        if (decisions.some((decision) => decision !== "granted")) return false;
+        if (decisions.some((decision) => decision !== "granted")) {
+          setMotionNotice("Motion permission was not enabled. Tap again and allow it.");
+          return false;
+        }
       }
       detector.current.reset();
       motionEnabledRef.current = true;
       setMotionEnabled(true);
       primeSound();
+      setMotionNotice(calibrationRef.current.some((value) => value <= 0) ? "Motion is on. Calibrate the tape before it can measure." : "Rolling is on.");
       return true;
     } catch {
+      setMotionNotice("Motion could not be enabled in this browser.");
       return false;
     }
   };
@@ -374,6 +381,7 @@ export default function Home() {
     setPredictedDistance(null);
     calibrationRuntime.current = emptyRuntime();
     setCalibrationNotice("");
+    setMotionNotice("");
     setScreen("calibration");
   };
   const openSettings = () => {
@@ -468,6 +476,8 @@ export default function Home() {
     reversed={reversed}
     draggable={draggable}
     showEnableHint={screen === "measure" && !motionEnabled}
+    calibrationReady={calibration.every((value) => value > 0)}
+    motionNotice={screen === "measure" ? motionNotice : ""}
     onOffset={setTapeOffset}
     onDirection={chooseDirection}
     onReset={resetTapeZero}
@@ -516,7 +526,7 @@ function ToggleRow({ label, detail, checked, disabled = false, onChange }: { lab
   return <div className={`setting-row ${disabled ? "disabled" : ""}`}><div><strong>{label}</strong><span>{detail}</span></div><button className={`switch ${checked ? "on" : ""}`} aria-label={label} aria-pressed={checked} disabled={disabled} onClick={() => onChange(!checked)}><span /></button></div>;
 }
 
-function TapeRuler({ offset, scaleMm, units, reversed, draggable, showEnableHint, onOffset, onDirection, onReset, onEnableMotion }: { offset: number; scaleMm: number; units: "in" | "mm"; reversed: boolean; draggable: boolean; showEnableHint: boolean; onOffset: (value: number) => void; onDirection: (reversed: boolean) => void; onReset: () => void; onEnableMotion: () => void | Promise<boolean> }) {
+function TapeRuler({ offset, scaleMm, units, reversed, draggable, showEnableHint, calibrationReady, motionNotice, onOffset, onDirection, onReset, onEnableMotion }: { offset: number; scaleMm: number; units: "in" | "mm"; reversed: boolean; draggable: boolean; showEnableHint: boolean; calibrationReady: boolean; motionNotice: string; onOffset: (value: number) => void; onDirection: (reversed: boolean) => void; onReset: () => void; onEnableMotion: () => void | Promise<boolean> }) {
   const drag = useRef<{ pointerId: number; startX: number; startOffset: number } | null>(null);
   const pixelsPerUnit = units === "in" ? scaleMm * 25.4 : scaleMm;
   const direction = reversed ? -1 : 1;
@@ -534,10 +544,12 @@ function TapeRuler({ offset, scaleMm, units, reversed, draggable, showEnableHint
   const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (drag.current?.pointerId === event.pointerId) drag.current = null;
   };
+  const readiness = motionNotice || (calibrationReady ? "" : "Calibration needed before rolling can measure.");
   return <aside className={`tape-ruler ${showEnableHint ? "is-inactive" : ""}`} aria-label="Construction tape ruler">
     <div className="tape-controls" aria-label="Ruler direction and zero controls"><button className={!reversed ? "selected" : ""} aria-label="Measure right" onClick={() => onDirection(false)}>→</button><button className="zero-button" onClick={onReset}>0</button><button className={reversed ? "selected" : ""} aria-label="Measure left" onClick={() => onDirection(true)}>←</button></div>
     <div className={`tape-viewport ${draggable ? "is-draggable" : ""}`} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}>
-      {showEnableHint && <span className="motion-hint">Tap tape to enable rolling</span>}
+      {showEnableHint && <button className="motion-hint" onClick={() => void onEnableMotion()}>Tap to enable rolling</button>}
+      {readiness && <span className="motion-status">{readiness}</span>}
       {units === "in"
         ? TAPE_TICKS.map(({ division, inch, fraction }) => <TapeTick key={division} x={offset + direction * (division / 16) * pixelsPerUnit} inch={inch} fraction={fraction} />)
         : METRIC_TICKS.map(({ millimeter, centimeter, remainder }) => <MetricTick key={millimeter} x={offset + direction * millimeter * pixelsPerUnit} centimeter={centimeter} remainder={remainder} />)}
