@@ -11,7 +11,7 @@ type Vec = { x: number; y: number; z: number };
 type MotionSample = { gravity: Vec; acceleration: Vec; rotation: Vec; orientation: Orientation; gravityMagnitude: number; at: number };
 type ApplePermissionEvent = { requestPermission?: () => Promise<"granted" | "denied"> };
 type QuarterTurn = { from: Orientation; to: Orientation };
-type SavedCalibration = { values: number[]; orientationOrder: Orientation[] };
+type SavedCalibration = { values: number[]; orientationOrder: Orientation[]; zeroOffset: number };
 type UserSettings = { units: "in" | "mm"; sound: boolean; haptics: boolean };
 type CalibrationRuntime = {
   lastAlignment: number;
@@ -90,10 +90,11 @@ const readSavedCalibration = (): SavedCalibration => {
     return {
       values: Array.isArray(value.values) && value.values.length === 4 ? value.values : [0, 0, 0, 0],
       orientationOrder: Array.isArray(value.orientationOrder) ? value.orientationOrder.slice(0, 4) : [],
+      zeroOffset: Number.isFinite(value.zeroOffset) ? value.zeroOffset : 18,
     };
   }
   const legacy = loadJSON<number[]>(STORE.legacyCalibration, [0, 0, 0, 0]);
-  return { values: legacy.length === 4 ? legacy : [0, 0, 0, 0], orientationOrder: [] };
+  return { values: legacy.length === 4 ? legacy : [0, 0, 0, 0], orientationOrder: [], zeroOffset: 18 };
 };
 
 /** Accepts only a settled 90° roll and keeps opposite-direction movements out. */
@@ -210,6 +211,7 @@ export default function Home() {
   const [rulerScale, setRulerScale] = useState(3.78);
   const [calibration, setCalibration] = useState<number[]>([0, 0, 0, 0]);
   const [calibrationOrder, setCalibrationOrder] = useState<Orientation[]>([]);
+  const [zeroAlignment, setZeroAlignment] = useState(18);
   const [settings, setSettings] = useState<UserSettings>(DEFAULT_SETTINGS);
   const [tapeOffset, setTapeOffset] = useState(18);
   const [reversed, setReversed] = useState(false);
@@ -224,6 +226,7 @@ export default function Home() {
   const detector = useRef(new QuarterTurnEngine());
   const calibrationRef = useRef(calibration);
   const calibrationOrderRef = useRef(calibrationOrder);
+  const zeroAlignmentRef = useRef(zeroAlignment);
   const rulerScaleRef = useRef(rulerScale);
   const reversedRef = useRef(reversed);
   const motionEnabledRef = useRef(motionEnabled);
@@ -241,6 +244,7 @@ export default function Home() {
     setRulerScale(clamp(Number.isFinite(savedScale) ? savedScale : 3.78, 2.5, 10));
     setCalibration(savedCalibration.values);
     setCalibrationOrder(savedCalibration.orientationOrder);
+    setZeroAlignment(savedCalibration.zeroOffset);
     setSettings({
       units: savedSettings.units === "mm" ? "mm" : "in",
       sound: Boolean(savedSettings.sound),
@@ -248,8 +252,9 @@ export default function Home() {
     });
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => undefined);
   }, []);
-  useEffect(() => { calibrationRef.current = calibration; localStorage.setItem(STORE.calibration, JSON.stringify({ values: calibration, orientationOrder: calibrationOrderRef.current })); }, [calibration]);
-  useEffect(() => { calibrationOrderRef.current = calibrationOrder; localStorage.setItem(STORE.calibration, JSON.stringify({ values: calibrationRef.current, orientationOrder: calibrationOrder })); }, [calibrationOrder]);
+  useEffect(() => { calibrationRef.current = calibration; localStorage.setItem(STORE.calibration, JSON.stringify({ values: calibration, orientationOrder: calibrationOrderRef.current, zeroOffset: zeroAlignmentRef.current })); }, [calibration]);
+  useEffect(() => { calibrationOrderRef.current = calibrationOrder; localStorage.setItem(STORE.calibration, JSON.stringify({ values: calibrationRef.current, orientationOrder: calibrationOrder, zeroOffset: zeroAlignmentRef.current })); }, [calibrationOrder]);
+  useEffect(() => { zeroAlignmentRef.current = zeroAlignment; localStorage.setItem(STORE.calibration, JSON.stringify({ values: calibrationRef.current, orientationOrder: calibrationOrderRef.current, zeroOffset: zeroAlignment })); }, [zeroAlignment]);
   useEffect(() => { rulerScaleRef.current = rulerScale; localStorage.setItem(STORE.rulerScale, String(rulerScale)); }, [rulerScale]);
   useEffect(() => { reversedRef.current = reversed; }, [reversed]);
   useEffect(() => { motionEnabledRef.current = motionEnabled; }, [motionEnabled]);
@@ -361,14 +366,13 @@ export default function Home() {
     }
   };
 
-  const resetTapeZero = (forReversed = reversedRef.current) => {
-    const viewportWidth = typeof window === "undefined" ? 390 : window.innerWidth;
-    setTapeOffset(forReversed ? Math.max(18, viewportWidth - 18) : 18);
+  const resetTapeZero = () => {
+    setTapeOffset(zeroAlignmentRef.current);
   };
   const chooseDirection = (nextReversed: boolean) => {
     setReversed(nextReversed);
     reversedRef.current = nextReversed;
-    resetTapeZero(nextReversed);
+    resetTapeZero();
     if (motionEnabledRef.current) detector.current.reset();
   };
   const openCalibration = () => {
@@ -408,6 +412,8 @@ export default function Home() {
       return;
     }
     calibrationRuntime.current = { ...emptyRuntime(), lastAlignment: tapeOffset, orientationOrder: [startOrientation] };
+    zeroAlignmentRef.current = tapeOffset;
+    setZeroAlignment(tapeOffset);
     setCalibrationTurns(0);
     setPredictedDistance(null);
     setCalibrationNotice("");
@@ -463,6 +469,7 @@ export default function Home() {
   const resetCalibration = () => {
     setCalibration([0, 0, 0, 0]);
     setCalibrationOrder([]);
+    setZeroAlignment(18);
     setCalibrationPhase("scale");
     setCalibrationTurns(0);
     setPredictedDistance(null);
