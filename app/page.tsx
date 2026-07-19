@@ -641,7 +641,7 @@ export default function Home() {
     {screen === "measure" && <MeasureScreen calibrated={calibration.every((value) => value > 0)} edge={measureEdge} motionEnabled={motionEnabled} motionNotice={motionNotice} precisionReading={precisionReading} draftMeasurements={draftMeasurements} onPrecisionPoint={capturePrecisionReading} onPrecisionFreeze={freezePrecisionReading} onSaveMeasurement={saveMemoryReading} onAddMeasurementPart={addMemoryPart} onEnableMotion={enableMotion} onCalibrate={openCalibration} onMemory={openMemory} onSettings={openSettings}>{sharedTape(false, measureEdge)}</MeasureScreen>}
     {screen === "calibration" && <CalibrationScreen phase={calibrationPhase} detectedOrientation={detectedOrientation} turns={calibrationTurns} notice={calibrationNotice} rulerScale={rulerScale} onScale={(value) => setRulerScale(clamp(value, 2.5, 10))} onSaveScale={saveScale} onCaptureStart={captureStart} onSaveAlignment={saveAlignment} onBack={goToMeasure} onFinish={goToMeasure}>{sharedTape(true, calibrationPhase === "rolling" ? tapeEdgeForOrientation(detectedOrientation) : "bottom", false, false)}</CalibrationScreen>}
     {screen === "settings" && <SettingsScreen calibrated={calibration.every((value) => value > 0)} settings={settings} onChangeSettings={setSettings} onReset={resetCalibration} onBack={goToMeasure} />}
-    {screen === "memory" && <MemoryScreen entries={memoryEntries} onBack={goToMeasure} />}
+    {screen === "memory" && <MemoryScreen entries={memoryEntries} onDelete={(ids) => setMemoryEntries((current) => current.filter((entry) => !ids.includes(entry.id)))} onBack={goToMeasure} />}
   </main>;
 }
 
@@ -742,8 +742,42 @@ function CalibrationScreen({ phase, detectedOrientation, turns, notice, rulerSca
   return <section className={`calibration-screen calibration-orientation-${rolling ? edge : "bottom"}`}><div className="calibration-stage"><header className="page-header"><button onClick={onBack}>‹ Ruler</button><span>Calibration</span></header><div className="calibration-card">{intro[phase]}{notice && <p className="calibration-notice">{notice}</p>}</div>{rolling && <div className="calibration-float"><div className="alignment-actions"><button className="plain-button" onClick={onSaveAlignment}>Save alignment</button></div><div className="corner-progress continuous-progress" aria-label="Four-side calibration progress">{Array.from({ length: 4 }, (_, index) => <span className={index < turns ? "saved" : index === turns ? "active" : ""} key={index}>{index + 1}</span>)}</div></div>}</div>{children}</section>;
 }
 
-function MemoryScreen({ entries, onBack }: { entries: MemoryEntry[]; onBack: () => void }) {
-  return <section className="memory-screen"><header className="page-header"><button onClick={onBack}>‹ Ruler</button><span>Memory</span></header><div className="memory-card"><h1>Saved measurements</h1>{entries.length === 0 ? <p className="empty-memory">Hold on the ruler, then save a reading here.</p> : <div className="memory-list">{entries.map((entry) => <div className="memory-row" key={entry.id}><strong>{entry.parts.map((part, index) => <span className="memory-part" key={`${entry.id}-${index}`}><MeasurementText label={part} compact />{index < entry.parts.length - 1 && <em>x</em>}</span>)}</strong><span>{new Date(entry.savedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span></div>)}</div>}</div></section>;
+function MemoryScreen({ entries, onDelete, onBack }: { entries: MemoryEntry[]; onDelete: (ids: string[]) => void; onBack: () => void }) {
+  const [selecting, setSelecting] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
+  const allSelected = entries.length > 0 && selectedIds.length === entries.length;
+  const leaveSelection = () => {
+    setSelecting(false);
+    setSelectedIds([]);
+  };
+  const toggleEntry = (id: string) => setSelectedIds((current) => current.includes(id) ? current.filter((savedId) => savedId !== id) : [...current, id]);
+  const selectAll = () => setSelectedIds(allSelected ? [] : entries.map((entry) => entry.id));
+  const deleteSelected = () => {
+    if (!selectedIds.length) return;
+    onDelete(selectedIds);
+    leaveSelection();
+  };
+  return <section className="memory-screen">
+    <header className={`page-header memory-header ${selecting ? "selecting" : ""}`}>
+      <button onClick={selecting ? leaveSelection : onBack}>{selecting ? "‹ Back" : "‹ Ruler"}</button>
+      <span>Memory</span>
+      {selecting ? <button className="delete-memory-button" disabled={!selectedIds.length} onClick={deleteSelected}>Delete</button> : <span />}
+    </header>
+    <div className="memory-card">
+      <div className="memory-title-row">
+        {selecting ? <button className="memory-title-back" onClick={leaveSelection}>‹ Back</button> : <h1>Saved measurements</h1>}
+        {entries.length > 0 && <button className="memory-select-button" onClick={selecting ? selectAll : () => setSelecting(true)}>{selecting ? (allSelected ? "Clear all" : "Select all") : "Select"}</button>}
+      </div>
+      {entries.length === 0 ? <p className="empty-memory">Hold on the ruler, then save a reading here.</p> : <div className={`memory-list ${selecting ? "is-selecting" : ""}`}>{entries.map((entry) => {
+        const selected = selectedIds.includes(entry.id);
+        return <button className={`memory-row ${selected ? "selected" : ""}`} key={entry.id} onClick={() => selecting && toggleEntry(entry.id)} disabled={!selecting}>
+          {selecting && <span className="memory-check" aria-hidden="true">{selected ? "✓" : ""}</span>}
+          <strong>{entry.parts.map((part, index) => <span className="memory-part" key={`${entry.id}-${index}`}><MeasurementText label={part} compact />{index < entry.parts.length - 1 && <em>x</em>}</span>)}</strong>
+          <span>{new Date(entry.savedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>
+        </button>;
+      })}</div>}
+    </div>
+  </section>;
 }
 
 function MeasurementText({ label, compact = false }: { label: string; compact?: boolean }) {
