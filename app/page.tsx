@@ -23,6 +23,7 @@ type CalibrationRuntime = {
   predictedMm: number | null;
   lastOrientation: Orientation;
 };
+type HomeRollRuntime = { orientation: Orientation; acceptedAt: number };
 
 const STORE = {
   calibration: "phoneroll.tape-calibration.v3",
@@ -76,6 +77,7 @@ const orientationName = (orientation: Orientation) => ({
   unknown: "waiting for orientation",
 }[orientation]);
 const tapeEdgeForOrientation = (orientation: Orientation): TapeEdge => ({ bottom_edge: "bottom", right_edge: "right", top_edge: "top", left_edge: "left", face_up: "bottom", face_down: "top", unknown: "bottom" }[orientation]);
+const DEFAULT_ROLL_ORDER: Orientation[] = ["bottom_edge", "right_edge", "top_edge", "left_edge"];
 const orientationFromAngles = (beta: number | null, gamma: number | null): Orientation => {
   const b = safeNumber(beta);
   const g = safeNumber(gamma);
@@ -86,6 +88,10 @@ const orientationFromAngles = (beta: number | null, gamma: number | null): Orien
 const tapeSpanForEdge = (edge: TapeEdge) => {
   if (typeof window === "undefined") return edge === "left" || edge === "right" ? 844 : 390;
   return edge === "left" || edge === "right" ? window.innerHeight : window.innerWidth;
+};
+const savedRollOrder = (order: Orientation[]) => {
+  const usable = order.length === 4 && order.every((orientation) => DEFAULT_ROLL_ORDER.includes(orientation));
+  return usable ? order : DEFAULT_ROLL_ORDER;
 };
 
 const loadJSON = <T,>(key: string, fallback: T): T => {
@@ -248,6 +254,7 @@ export default function Home() {
   const detectedOrientationRef = useRef(detectedOrientation);
   const orientationStableSince = useRef(0);
   const motionSampleAt = useRef(0);
+  const homeRoll = useRef<HomeRollRuntime>({ orientation: "unknown", acceptedAt: 0 });
   const calibrationRuntime = useRef<CalibrationRuntime>(emptyRuntime());
   const settingsRef = useRef(settings);
   const audioContext = useRef<AudioContext | null>(null);
@@ -302,9 +309,42 @@ export default function Home() {
     }
   };
 
+  const advanceHomeTape = (nextOrientation: Orientation, at: number) => {
+    if (screenRef.current !== "measure" || !motionEnabledRef.current || nextOrientation === "unknown") return;
+    const saved = calibrationRef.current;
+    if (saved.some((value) => value <= 0)) {
+      homeRoll.current.orientation = nextOrientation;
+      return;
+    }
+    const order = savedRollOrder(calibrationOrderRef.current);
+    const previous = homeRoll.current.orientation;
+    if (previous === "unknown" || previous === nextOrientation) {
+      homeRoll.current.orientation = nextOrientation;
+      return;
+    }
+    const fromIndex = order.indexOf(previous);
+    const toIndex = order.indexOf(nextOrientation);
+    if (fromIndex < 0 || toIndex < 0) {
+      homeRoll.current.orientation = nextOrientation;
+      return;
+    }
+    const forward = toIndex === (fromIndex + 1) % 4;
+    const backward = toIndex === (fromIndex + 3) % 4;
+    const expectedDirection = reversedRef.current ? backward : forward;
+    if (!expectedDirection || at - homeRoll.current.acceptedAt < 280) {
+      homeRoll.current.orientation = nextOrientation;
+      return;
+    }
+    const distanceMm = forward ? saved[fromIndex] : saved[toIndex];
+    setTapeOffset((current) => current + (reversedRef.current ? distanceMm : -distanceMm) * rulerScaleRef.current);
+    homeRoll.current = { orientation: nextOrientation, acceptedAt: at };
+    confirmFlip();
+  };
+
   useEffect(() => {
     const updateDetectedOrientation = (nextOrientation: Orientation, at: number) => {
       if (nextOrientation === "unknown" || detectedOrientationRef.current === nextOrientation) return;
+      advanceHomeTape(nextOrientation, at);
       detectedOrientationRef.current = nextOrientation;
       orientationStableSince.current = at;
       setDetectedOrientation(nextOrientation);
@@ -316,16 +356,8 @@ export default function Home() {
       const sample: MotionSample = { gravity, acceleration, rotation, orientation: orientationFromGravity(gravity), gravityMagnitude: magnitude(gravity), at: event.timeStamp || performance.now() };
       motionSampleAt.current = sample.at;
       updateDetectedOrientation(sample.orientation, sample.at);
-      if (screenRef.current === "calibration" && calibrationPhaseRef.current === "rolling") return;
-      const turn = detector.current.update(sample);
-      if (!turn) return;
-      confirmFlip();
-
-      const saved = calibrationRef.current;
-      if (saved.some((value) => value <= 0)) return;
-      const mappedIndex = calibrationOrderRef.current.indexOf(turn.from);
-      const corner = saved[mappedIndex >= 0 ? mappedIndex : (detector.current.getAccepted() - 1) % 4];
-      setTapeOffset((current) => current + (reversedRef.current ? corner * rulerScaleRef.current : -corner * rulerScaleRef.current));
+      if (!motionEnabledRef.current || (screenRef.current === "calibration" && calibrationPhaseRef.current === "rolling")) return;
+      detector.current.update(sample);
     };
     const readOrientation = (event: DeviceOrientationEvent) => {
       const now = event.timeStamp || performance.now();
@@ -365,6 +397,7 @@ export default function Home() {
         }
       }
       detector.current.reset();
+      homeRoll.current = { orientation: detectedOrientationRef.current, acceptedAt: performance.now() };
       motionEnabledRef.current = true;
       setMotionEnabled(true);
       primeSound();
@@ -380,6 +413,7 @@ export default function Home() {
     const startingEdge = zeroAlignmentRef.current ?? -2;
     const edge = tapeEdgeForOrientation(detectedOrientationRef.current);
     const tapeSpan = tapeSpanForEdge(edge);
+    homeRoll.current = { orientation: detectedOrientationRef.current, acceptedAt: performance.now() };
     setTapeOffset(reversedRef.current ? tapeSpan - startingEdge : startingEdge);
   };
   useEffect(() => {
@@ -402,6 +436,7 @@ export default function Home() {
   };
   const openCalibration = () => {
     detector.current.stop();
+    homeRoll.current = { orientation: "unknown", acceptedAt: 0 };
     motionEnabledRef.current = false;
     setMotionEnabled(false);
     setCalibrationPhase("scale");
@@ -414,6 +449,7 @@ export default function Home() {
   };
   const openSettings = () => {
     detector.current.stop();
+    homeRoll.current = { orientation: "unknown", acceptedAt: 0 };
     motionEnabledRef.current = false;
     setMotionEnabled(false);
     setScreen("settings");
@@ -519,18 +555,21 @@ export default function Home() {
   const measureEdge = tapeEdgeForOrientation(detectedOrientation);
 
   return <main className="app-shell" onPointerDownCapture={() => { void enableMotion(); }}>
-    {screen === "measure" && <MeasureScreen calibrated={calibration.every((value) => value > 0)} edge={measureEdge} onCalibrate={openCalibration} onSettings={openSettings}>{sharedTape(false, measureEdge)}</MeasureScreen>}
+    {screen === "measure" && <MeasureScreen calibrated={calibration.every((value) => value > 0)} edge={measureEdge} motionEnabled={motionEnabled} motionNotice={motionNotice} onEnableMotion={enableMotion} onCalibrate={openCalibration} onSettings={openSettings}>{sharedTape(false, measureEdge)}</MeasureScreen>}
     {screen === "calibration" && <CalibrationScreen phase={calibrationPhase} detectedOrientation={detectedOrientation} turns={calibrationTurns} notice={calibrationNotice} rulerScale={rulerScale} onScale={(value) => setRulerScale(clamp(value, 2.5, 10))} onSaveScale={saveScale} onCaptureStart={captureStart} onSaveAlignment={saveAlignment} onBack={goToMeasure} onFinish={goToMeasure}>{sharedTape(true, calibrationPhase === "rolling" ? tapeEdgeForOrientation(detectedOrientation) : "bottom", false, false)}</CalibrationScreen>}
     {screen === "settings" && <SettingsScreen calibrated={calibration.every((value) => value > 0)} settings={settings} onChangeSettings={setSettings} onReset={resetCalibration} onBack={goToMeasure} />}
   </main>;
 }
 
-function MeasureScreen({ calibrated, edge, onCalibrate, onSettings, children }: { calibrated: boolean; edge: TapeEdge; onCalibrate: () => void; onSettings: () => void; children: ReactNode }) {
+function MeasureScreen({ calibrated, edge, motionEnabled, motionNotice, onEnableMotion, onCalibrate, onSettings, children }: { calibrated: boolean; edge: TapeEdge; motionEnabled: boolean; motionNotice: string; onEnableMotion: () => Promise<boolean>; onCalibrate: () => void; onSettings: () => void; children: ReactNode }) {
   return <section className={`measure-screen measure-orientation-${edge}`}>
     <div className="measure-stage">
       <div className="home-status-cluster">
         <span className={`measure-status ${calibrated ? "ready" : "calibrate"}`}>{calibrated ? "Ready" : "Calibrate"}</span>
         <span className="orientation-reminder">Lock phone orientation first</span>
+        {calibrated && !motionEnabled && <button className="enable-motion-button" onClick={() => void onEnableMotion()}>Enable rolling</button>}
+        {calibrated && motionEnabled && <span className="rolling-state">Rolling live</span>}
+        {motionNotice && !motionEnabled && <span className="rolling-warning">{motionNotice}</span>}
       </div>
       <div className="home-actions" aria-label="PhoneRoll controls">
         <button className="home-icon-button calibrate-icon" aria-label="Calibrate tape" title="Calibrate tape" onClick={onCalibrate} />
