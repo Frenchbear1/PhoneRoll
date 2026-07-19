@@ -75,7 +75,7 @@ const orientationName = (orientation: Orientation) => ({
   right_edge: "right edge",
   unknown: "waiting for orientation",
 }[orientation]);
-const tapeEdgeForOrientation = (orientation: Orientation): TapeEdge => ({ bottom_edge: "top", right_edge: "bottom", top_edge: "bottom", left_edge: "bottom", face_up: "bottom", face_down: "bottom", unknown: "bottom" }[orientation]);
+const tapeEdgeForOrientation = (orientation: Orientation): TapeEdge => ({ bottom_edge: "bottom", right_edge: "right", top_edge: "top", left_edge: "left", face_up: "bottom", face_down: "top", unknown: "bottom" }[orientation]);
 
 const loadJSON = <T,>(key: string, fallback: T): T => {
   try {
@@ -255,6 +255,7 @@ export default function Home() {
       haptics: savedSettings.haptics !== false,
     });
     if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => undefined);
+    void screen.orientation?.lock?.("portrait").catch(() => undefined);
   }, []);
   useEffect(() => { calibrationRef.current = calibration; localStorage.setItem(STORE.calibration, JSON.stringify({ values: calibration, orientationOrder: calibrationOrderRef.current, zeroOffset: zeroAlignmentRef.current })); }, [calibration]);
   useEffect(() => { calibrationOrderRef.current = calibrationOrder; localStorage.setItem(STORE.calibration, JSON.stringify({ values: calibrationRef.current, orientationOrder: calibrationOrder, zeroOffset: zeroAlignmentRef.current })); }, [calibrationOrder]);
@@ -490,7 +491,7 @@ function MeasureScreen({ calibrated, menuOpen, onMenu, onCalibrate, onSettings, 
   </section>;
 }
 
-function CalibrationScreen({ phase, detectedOrientation, turns, notice, rulerScale, reversed, onScale, onSaveScale, onCaptureStart, onSaveAlignment, onBack, onFinish, children }: {
+function LegacyCalibrationScreen({ phase, detectedOrientation, turns, notice, rulerScale, reversed, onScale, onSaveScale, onCaptureStart, onSaveAlignment, onBack, onFinish, children }: {
   phase: CalibrationPhase; detectedOrientation: Orientation; turns: number; notice: string; rulerScale: number; reversed: boolean; onScale: (value: number) => void; onSaveScale: () => void; onCaptureStart: () => void; onSaveAlignment: () => void; onBack: () => void; onFinish: () => void; children: ReactNode;
 }) {
   const status = phase === "rolling"
@@ -506,6 +507,20 @@ function CalibrationScreen({ phase, detectedOrientation, turns, notice, rulerSca
   };
   steps = { ...steps, rolling: <><p className="step-count">Step 3 of 3 · side {Math.min(turns + 1, 4)} of 4</p><h1>Rotate once, align, then save.</h1><p>Roll one quarter turn {reversed ? "to the left" : "to the right"}. PhoneRoll follows the detected edge, including the upside-down side. Align the tape to the real ruler, then save this side.</p>{status}</> };
   return <section className="calibration-screen"><header className="page-header"><button onClick={onBack}>‹ Ruler</button><span>Calibration</span></header><div className="calibration-card">{steps[phase]}{notice && <p className="calibration-notice">{notice}</p>}</div>{phase === "rolling" && <div className="calibration-float"><div className="corner-progress continuous-progress" aria-label="Calibration roll progress">{Array.from({ length: 4 }, (_, index) => <span className={index < Math.min(turns, 4) ? "saved" : index === turns % 4 ? "active" : ""} key={index}>{index + 1}</span>)}</div><div className="alignment-actions"><button className="plain-button" onClick={onSaveAlignment}>Save alignment &amp; roll again</button>{readyForFinish && <button className="action-button" onClick={onConfirmPrediction}>Looks right — finish</button>}</div></div>}{children}</section>;
+}
+
+function CalibrationScreen({ phase, detectedOrientation, turns, notice, rulerScale, reversed, onScale, onSaveScale, onCaptureStart, onSaveAlignment, onBack, onFinish, children }: {
+  phase: CalibrationPhase; detectedOrientation: Orientation; turns: number; notice: string; rulerScale: number; reversed: boolean; onScale: (value: number) => void; onSaveScale: () => void; onCaptureStart: () => void; onSaveAlignment: () => void; onBack: () => void; onFinish: () => void; children: ReactNode;
+}) {
+  const edge = tapeEdgeForOrientation(detectedOrientation);
+  const rolling = phase === "rolling";
+  const intro = {
+    scale: <><p className="step-count">Step 1 of 3</p><h1>Match the tape to a real tape measure.</h1><p>Adjust the scale until the inch and fraction marks line up with your real tape.</p><input className="scale-slider" aria-label="Tape scale" type="range" min="2.5" max="10" step="0.01" value={rulerScale} onChange={(event) => onScale(Number(event.target.value))} /><button className="action-button" onClick={onSaveScale}>Save tape size</button></>,
+    start: <><p className="step-count">Step 2 of 3</p><h1>Start upright with the left side at zero.</h1><p>Keep the phone upright. Align its left edge at 0 on the real ruler, align the yellow tape, then lock this starting position.</p><div className="orientation-readout"><span>Detected orientation</span><strong>{orientationName(detectedOrientation)}</strong></div><button className="action-button" onClick={onCaptureStart}>Lock starting alignment</button></>,
+    rolling: <><p className="step-count">Step 3 of 3 · side {Math.min(turns + 1, 4)} of 4</p><h1>Rotate, align, save.</h1><p>Rotate one quarter turn {reversed ? "to the left" : "to the right"}. The complete calibration view now turns with the detected phone edge.</p><div className="calibration-status"><span>Detected edge</span><strong>{orientationName(detectedOrientation)}</strong><span>Saved sides</span><strong>{turns} of 4</strong></div></>,
+    complete: <><p className="step-count">Calibration complete</p><h1>The tape is ready to roll.</h1><p>All four orientation-aware side distances are saved.</p><button className="action-button" onClick={onFinish}>Use the tape</button></>,
+  };
+  return <section className={`calibration-screen calibration-orientation-${rolling ? edge : "bottom"}`}><div className="calibration-stage"><header className="page-header"><button onClick={onBack}>‹ Ruler</button><span>Calibration</span></header><div className="calibration-card">{intro[phase]}{notice && <p className="calibration-notice">{notice}</p>}</div>{rolling && <div className="calibration-float"><div className="alignment-actions"><button className="plain-button" onClick={onSaveAlignment}>Save alignment</button></div><div className="corner-progress continuous-progress" aria-label="Four-side calibration progress">{Array.from({ length: 4 }, (_, index) => <span className={index < turns ? "saved" : index === turns ? "active" : ""} key={index}>{index + 1}</span>)}</div></div>}</div>{children}</section>;
 }
 
 function SettingsScreen({ calibrated, settings, onChangeSettings, onReset, onBack }: { calibrated: boolean; settings: UserSettings; onChangeSettings: (settings: UserSettings) => void; onReset: () => void; onBack: () => void }) {
