@@ -686,10 +686,9 @@ function MeasureScreen({ calibrated, edge, motionEnabled, motionNotice, precisio
   return <section className={`measure-screen measure-orientation-${edge}`} onPointerDown={startPreciseRead} onPointerMove={movePreciseRead} onPointerUp={endPreciseRead} onPointerCancel={endPreciseRead}>
     <div className="measure-stage">
       <div className="home-status-cluster">
-        <span className={`measure-status ${calibrated ? "ready" : "calibrate"}`}>{calibrated ? "Ready" : "Calibrate"}</span>
+        <span className={`measure-status ${calibrated ? "ready" : "calibrate"}`}>{calibrated ? "Calibrated" : "Calibrate"}{calibrated && motionEnabled && <span className="status-dot"> · </span>} {calibrated && motionEnabled && <span className="rolling-inline">Rolling live</span>}</span>
         <span className="orientation-reminder">Lock phone orientation first</span>
         {calibrated && !motionEnabled && <button className="enable-motion-button" onClick={() => void onEnableMotion()}>Enable rolling</button>}
-        {calibrated && motionEnabled && <span className="rolling-state">Rolling live</span>}
         {motionNotice && !motionEnabled && <span className="rolling-warning">{motionNotice}</span>}
       </div>
       <div className="home-actions" aria-label="PhoneRoll controls">
