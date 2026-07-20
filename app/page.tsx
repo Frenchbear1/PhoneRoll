@@ -51,12 +51,20 @@ const safeNumber = (value: number | null | undefined) => Number.isFinite(value) 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value));
 const emptyRuntime = (): CalibrationRuntime => ({ lastAlignment: 0, turnCount: 0, draftValues: [null, null, null, null], orientationOrder: [], pending: null, predictedMm: null, lastOrientation: "unknown" });
 
+/**
+ * Classify only the direction of gravity inside the screen plane. Forward/back
+ * pitch changes Z and the X/Y magnitude, but not this roll direction. When the
+ * phone is nearly flat, return unknown so the last valid side stays active.
+ */
 const orientationFromGravity = (vector: Vec): Orientation => {
-  const v = normalize(vector);
+  const totalMagnitude = magnitude(vector);
+  const rollMagnitude = Math.hypot(vector.x, vector.y);
+  if (totalMagnitude === 0 || rollMagnitude / totalMagnitude < 0.18) return "unknown";
+  const x = vector.x / rollMagnitude;
+  const y = vector.y / rollMagnitude;
   const choices: Array<[number, Orientation]> = [
-    [Math.abs(v.x), v.x > 0 ? "right_edge" : "left_edge"],
-    [Math.abs(v.y), v.y > 0 ? "top_edge" : "bottom_edge"],
-    [Math.abs(v.z), v.z > 0 ? "face_up" : "face_down"],
+    [Math.abs(x), x > 0 ? "right_edge" : "left_edge"],
+    [Math.abs(y), y > 0 ? "top_edge" : "bottom_edge"],
   ];
   const [largest, name] = choices.sort((a, b) => b[0] - a[0])[0];
   return largest > 0.8 ? name : "unknown";
@@ -82,11 +90,13 @@ const tapeEdgeForOrientation = (orientation: Orientation): TapeEdge => ({
 } satisfies Record<Orientation, TapeEdge>)[orientation];
 const DEFAULT_ROLL_ORDER: Orientation[] = ["bottom_edge", "right_edge", "top_edge", "left_edge"];
 const orientationFromAngles = (beta: number | null, gamma: number | null): Orientation => {
-  const b = safeNumber(beta);
-  const g = safeNumber(gamma);
-  if (Math.abs(g) > 52 && Math.abs(g) >= Math.abs(b) * 0.75) return g > 0 ? "right_edge" : "left_edge";
-  if (Math.abs(b) > 52) return b > 0 ? "bottom_edge" : "top_edge";
-  return "unknown";
+  const b = safeNumber(beta) * Math.PI / 180;
+  const g = safeNumber(gamma) * Math.PI / 180;
+  return orientationFromGravity({
+    x: Math.sin(g) * Math.cos(b),
+    y: -Math.sin(b),
+    z: Math.cos(g) * Math.cos(b),
+  });
 };
 const fallbackTapeSpanForEdge = (edge: TapeEdge) => edge === "left" || edge === "right" ? 844 : 390;
 const tapeSpanForEdge = (edge: TapeEdge) => {
