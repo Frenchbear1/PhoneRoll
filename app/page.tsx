@@ -88,8 +88,9 @@ const orientationFromAngles = (beta: number | null, gamma: number | null): Orien
   if (Math.abs(b) > 52) return b > 0 ? "bottom_edge" : "top_edge";
   return "unknown";
 };
+const fallbackTapeSpanForEdge = (edge: TapeEdge) => edge === "left" || edge === "right" ? 844 : 390;
 const tapeSpanForEdge = (edge: TapeEdge) => {
-  if (typeof window === "undefined") return edge === "left" || edge === "right" ? 844 : 390;
+  if (typeof window === "undefined") return fallbackTapeSpanForEdge(edge);
   return edge === "left" || edge === "right" ? window.innerHeight : window.innerWidth;
 };
 const visibleDistanceRange = (offset: number, direction: number, pixelsPerUnit: number, span: number) => {
@@ -1006,9 +1007,19 @@ function ToggleRow({ label, detail, checked, disabled = false, onChange }: { lab
 
 function TapeRuler({ offset, scaleMm, units, edge, reversed, draggable, showControls, showEnableHint, motionNotice, manualAdvance, onOffset, onDirection, onManualStep, onReset, onEnableMotion }: { offset: number; scaleMm: number; units: "in" | "mm"; edge: TapeEdge; reversed: boolean; draggable: boolean; showControls: boolean; showEnableHint: boolean; motionNotice: string; manualAdvance: boolean; onOffset: (value: number) => void; onDirection: (reversed: boolean) => void; onManualStep: (step: -1 | 1) => void; onReset: () => void; onEnableMotion: () => void | Promise<boolean> }) {
   const drag = useRef<{ pointerId: number; startCoordinate: number; startOffset: number; edge: TapeEdge } | null>(null);
+  const [tapeSpan, setTapeSpan] = useState(() => fallbackTapeSpanForEdge(edge));
+  useEffect(() => {
+    const updateTapeSpan = () => setTapeSpan(tapeSpanForEdge(edge));
+    updateTapeSpan();
+    window.addEventListener("resize", updateTapeSpan);
+    window.visualViewport?.addEventListener("resize", updateTapeSpan);
+    return () => {
+      window.removeEventListener("resize", updateTapeSpan);
+      window.visualViewport?.removeEventListener("resize", updateTapeSpan);
+    };
+  }, [edge]);
   const pixelsPerUnit = units === "in" ? scaleMm * 25.4 : scaleMm;
   const direction = reversed ? -1 : 1;
-  const tapeSpan = tapeSpanForEdge(edge);
   const imperialTicks = units === "in" ? buildImperialTicks(offset, direction, pixelsPerUnit, tapeSpan) : [];
   const metricTicks = units === "mm" ? buildMetricTicks(offset, direction, pixelsPerUnit, tapeSpan) : [];
   const dragCoordinate = (event: ReactPointerEvent<HTMLDivElement>, tapeEdge: TapeEdge) => {
