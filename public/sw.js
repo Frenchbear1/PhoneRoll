@@ -1,4 +1,4 @@
-const CACHE = "phoneroll-shell-v44";
+const CACHE = "phoneroll-shell-v45";
 const CORE = [
   "./",
   "manifest.webmanifest",

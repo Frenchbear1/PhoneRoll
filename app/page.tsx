@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import type { CSSProperties, PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties, MutableRefObject, PointerEvent as ReactPointerEvent, ReactNode } from "react";
 
 type Screen = "measure" | "calibration" | "settings" | "memory";
 type Orientation = "face_up" | "face_down" | "top_edge" | "bottom_edge" | "left_edge" | "right_edge" | "unknown";
@@ -13,7 +13,9 @@ type MotionSample = { gravity: Vec; acceleration: Vec; rotation: Vec; orientatio
 type ApplePermissionEvent = { requestPermission?: () => Promise<"granted" | "denied"> };
 type QuarterTurn = { from: Orientation; to: Orientation };
 type SavedCalibration = { values: number[]; orientationOrder: Orientation[]; zeroOffset: number | null };
-type UserSettings = { units: "in" | "mm"; manualAdvance: boolean };
+type UserSettings = { units: "in" | "mm"; manualAdvance: boolean; wrapCorners: boolean; cornerRadius: number | null };
+type EdgeOrientation = "bottom_edge" | "right_edge" | "top_edge" | "left_edge";
+type CornerDistances = { left: number | null; right: number | null };
 type PrecisionReading = { x: number; y: number; edge: TapeEdge; valueMm: number; label: string };
 type MemoryEntry = { id: string; parts: string[]; savedAt: number };
 type CalcTool = "none" | "total" | "area" | "perimeter" | "diagonal" | "volume" | "spaceDiagonal" | "circumference" | "diameter";
@@ -36,7 +38,7 @@ const STORE = {
   memory: "phoneroll.measurement-memory.v1",
 };
 const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? "";
-const DEFAULT_SETTINGS: UserSettings = { units: "in", manualAdvance: false };
+const DEFAULT_SETTINGS: UserSettings = { units: "in", manualAdvance: false, wrapCorners: true, cornerRadius: null };
 const ROLL_CLICK_SRC = "data:audio/wav;base64,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";
 
 const blank = (): Vec => ({ x: 0, y: 0, z: 0 });
@@ -89,55 +91,50 @@ const tapeEdgeForOrientation = (orientation: Orientation): TapeEdge => ({
   unknown: "bottom",
 } satisfies Record<Orientation, TapeEdge>)[orientation];
 const DEFAULT_ROLL_ORDER: Orientation[] = ["bottom_edge", "right_edge", "top_edge", "left_edge"];
-const orientationFromAngles = (beta: number | null, gamma: number | null): Orientation => {
+const gravityFromAngles = (beta: number | null, gamma: number | null): Vec => {
   const b = safeNumber(beta) * Math.PI / 180;
   const g = safeNumber(gamma) * Math.PI / 180;
-  return orientationFromGravity({
-    x: Math.sin(g) * Math.cos(b),
-    y: -Math.sin(b),
-    z: Math.cos(g) * Math.cos(b),
-  });
+  return { x: Math.sin(g) * Math.cos(b) * 9.81, y: -Math.sin(b) * 9.81, z: Math.cos(g) * Math.cos(b) * 9.81 };
+};
+const orientationFromAngles = (beta: number | null, gamma: number | null): Orientation => orientationFromGravity(gravityFromAngles(beta, gamma));
+/**
+ * WebKit on iOS reports accelerationIncludingGravity pointing toward the
+ * ground; Android browsers (and the spec) report the opposite sign. Everything
+ * here uses the iOS sense, so flip readings everywhere else.
+ */
+let motionSignCache: number | null = null;
+const motionSign = () => {
+  if (motionSignCache === null) {
+    const ios = typeof navigator !== "undefined" && (/iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.userAgent.includes("Macintosh") && navigator.maxTouchPoints > 1));
+    motionSignCache = ios ? 1 : -1;
+  }
+  return motionSignCache;
+};
+/** Physical roll directions: rolling "right" pivots over the stage's bottom-right corner. */
+const RIGHT_OF: Record<EdgeOrientation, EdgeOrientation> = { bottom_edge: "right_edge", right_edge: "top_edge", top_edge: "left_edge", left_edge: "bottom_edge" };
+const LEFT_OF: Record<EdgeOrientation, EdgeOrientation> = { bottom_edge: "left_edge", left_edge: "top_edge", top_edge: "right_edge", right_edge: "bottom_edge" };
+const isEdgeOrientation = (orientation: Orientation): orientation is EdgeOrientation => orientation in RIGHT_OF;
+const edgeOrientation = (edge: TapeEdge): EdgeOrientation => ({ bottom: "bottom_edge", right: "right_edge", top: "top_edge", left: "left_edge" } as const)[edge];
+/** Calibrated roll distance across the corner shared by two adjacent edges, in either roll direction. */
+const cornerDistanceMm = (order: Orientation[], values: number[], a: Orientation, b: Orientation) => {
+  const i = order.indexOf(a);
+  const j = order.indexOf(b);
+  if (i < 0 || j < 0) return null;
+  if ((i + 1) % 4 === j) return values[i] > 0 ? values[i] : null;
+  if ((j + 1) % 4 === i) return values[j] > 0 ? values[j] : null;
+  return null;
+};
+/** Best guess at the display's corner radius in CSS px (iPhone screens by short side). */
+const autoCornerRadius = () => {
+  if (typeof window === "undefined") return 47;
+  const short = Math.round(Math.min(window.screen.width, window.screen.height));
+  const known: Record<number, number> = { 320: 8, 375: 41, 390: 47, 393: 55, 402: 62, 414: 41, 428: 53, 430: 55, 440: 62 };
+  return known[short] ?? Math.round(short * 0.11);
 };
 const fallbackTapeSpanForEdge = (edge: TapeEdge) => edge === "left" || edge === "right" ? 844 : 390;
 const tapeSpanForEdge = (edge: TapeEdge) => {
   if (typeof window === "undefined") return fallbackTapeSpanForEdge(edge);
   return edge === "left" || edge === "right" ? window.innerHeight : window.innerWidth;
-};
-const visibleDistanceRange = (offset: number, direction: number, pixelsPerUnit: number, span: number) => {
-  const pad = Math.max(220, pixelsPerUnit * 3);
-  const minPixel = -pad;
-  const maxPixel = span + pad;
-  const low = direction === 1 ? (minPixel - offset) / pixelsPerUnit : (offset - maxPixel) / pixelsPerUnit;
-  const high = direction === 1 ? (maxPixel - offset) / pixelsPerUnit : (offset - minPixel) / pixelsPerUnit;
-  return { low: Math.max(0, low), high: Math.max(0, high) };
-};
-const buildImperialTicks = (offset: number, direction: number, pixelsPerInch: number, span: number) => {
-  const { low, high } = visibleDistanceRange(offset, direction, pixelsPerInch, span);
-  const start = Math.max(0, Math.floor(low * 16) - 3);
-  const end = Math.ceil(high * 16) + 3;
-  return Array.from({ length: Math.max(0, end - start + 1) }, (_, index) => {
-    const division = start + index;
-    return {
-      division,
-      x: offset + direction * (division / 16) * pixelsPerInch,
-      inch: Math.floor(division / 16),
-      fraction: division % 16,
-    };
-  });
-};
-const buildMetricTicks = (offset: number, direction: number, pixelsPerMillimeter: number, span: number) => {
-  const { low, high } = visibleDistanceRange(offset, direction, pixelsPerMillimeter, span);
-  const start = Math.max(0, Math.floor(low) - 10);
-  const end = Math.ceil(high) + 10;
-  return Array.from({ length: Math.max(0, end - start + 1) }, (_, index) => {
-    const millimeter = start + index;
-    return {
-      millimeter,
-      x: offset + direction * millimeter * pixelsPerMillimeter,
-      centimeter: Math.floor(millimeter / 10),
-      remainder: millimeter % 10,
-    };
-  });
 };
 const savedRollOrder = (order: Orientation[]) => {
   const usable = order.length === 4 && order.every((orientation) => DEFAULT_ROLL_ORDER.includes(orientation));
@@ -399,6 +396,8 @@ export default function Home() {
   const precisionReadingRef = useRef<PrecisionReading | null>(null);
   const precisionSecondReadingRef = useRef<PrecisionReading | null>(null);
   const precisionFrozenRef = useRef(false);
+  const gravityRef = useRef<Vec | null>(null);
+  const [autoRadius, setAutoRadius] = useState(47);
 
   const activateMotion = () => {
     detector.current.reset();
@@ -416,6 +415,7 @@ export default function Home() {
     calibrationRef.current = savedCalibration.values;
     calibrationOrderRef.current = savedCalibration.orientationOrder;
     zeroAlignmentRef.current = savedCalibration.zeroOffset;
+    setAutoRadius(autoCornerRadius());
     setRulerScale(clamp(Number.isFinite(savedScale) ? savedScale : 3.78, 2.5, 10));
     setCalibration(savedCalibration.values);
     setCalibrationOrder(savedCalibration.orientationOrder);
@@ -424,6 +424,8 @@ export default function Home() {
     setSettings({
       units: savedSettings.units === "mm" ? "mm" : "in",
       manualAdvance: Boolean(savedSettings.manualAdvance),
+      wrapCorners: savedSettings.wrapCorners !== false,
+      cornerRadius: Number.isFinite(savedSettings.cornerRadius) ? clamp(Number(savedSettings.cornerRadius), 0, 90) : null,
     });
     setMemoryEntries(Array.isArray(savedMemory) ? savedMemory.filter((entry) => entry && Array.isArray(entry.parts)) : []);
     if ("serviceWorker" in navigator) navigator.serviceWorker.register(`${BASE_PATH}/sw.js`).catch(() => undefined);
@@ -471,7 +473,10 @@ export default function Home() {
       return;
     }
     const distanceMm = forward ? saved[fromIndex] : saved[toIndex];
-    setTapeOffset((current) => current + (forward ? -distanceMm : distanceMm) * rulerScaleRef.current);
+    // Shift by the physical roll direction, not the calibration order, so a
+    // calibration that was rolled leftward still moves the tape the right way.
+    const rolledRight = isEdgeOrientation(previous) ? RIGHT_OF[previous] === nextOrientation : forward;
+    setTapeOffset((current) => current + (rolledRight ? -distanceMm : distanceMm) * rulerScaleRef.current);
     homeRoll.current = { orientation: nextOrientation, acceptedAt: at };
   };
 
@@ -484,11 +489,13 @@ export default function Home() {
       setDetectedOrientation(nextOrientation);
     };
     const readMotion = (event: DeviceMotionEvent) => {
-      const gravity = event.accelerationIncludingGravity ? { x: safeNumber(event.accelerationIncludingGravity.x), y: safeNumber(event.accelerationIncludingGravity.y), z: safeNumber(event.accelerationIncludingGravity.z) } : blank();
+      const sign = motionSign();
+      const gravity = event.accelerationIncludingGravity ? { x: sign * safeNumber(event.accelerationIncludingGravity.x), y: sign * safeNumber(event.accelerationIncludingGravity.y), z: sign * safeNumber(event.accelerationIncludingGravity.z) } : blank();
       const acceleration = event.acceleration ? { x: safeNumber(event.acceleration.x), y: safeNumber(event.acceleration.y), z: safeNumber(event.acceleration.z) } : blank();
       const rotation = event.rotationRate ? { x: safeNumber(event.rotationRate.alpha), y: safeNumber(event.rotationRate.beta), z: safeNumber(event.rotationRate.gamma) } : blank();
       const sample: MotionSample = { gravity, acceleration, rotation, orientation: orientationFromGravity(gravity), gravityMagnitude: magnitude(gravity), at: event.timeStamp || performance.now() };
       motionSampleAt.current = sample.at;
+      if (event.accelerationIncludingGravity) gravityRef.current = gravity;
       updateDetectedOrientation(sample.orientation, sample.at);
       if (!motionEnabledRef.current || (screenRef.current === "calibration" && calibrationPhaseRef.current === "rolling")) return;
       detector.current.update(sample);
@@ -496,6 +503,7 @@ export default function Home() {
     const readOrientation = (event: DeviceOrientationEvent) => {
       const now = event.timeStamp || performance.now();
       if (now - motionSampleAt.current < 350) return;
+      if (event.beta !== null && event.gamma !== null) gravityRef.current = gravityFromAngles(event.beta, event.gamma);
       updateDetectedOrientation(orientationFromAngles(event.beta, event.gamma), now);
     };
     window.addEventListener("devicemotion", readMotion, true);
@@ -783,7 +791,13 @@ export default function Home() {
     settingsRef.current = nextSettings;
     setSettings(nextSettings);
   };
-  const sharedTape = (draggable: boolean, edge: TapeEdge = "bottom", showControls = screen === "measure", tapeReversed = reversed) => <TapeRuler
+  const cornerDistancesFor = (edge: TapeEdge): CornerDistances => {
+    if (calibration.some((value) => value <= 0)) return { left: null, right: null };
+    const order = savedRollOrder(calibrationOrder);
+    const here = edgeOrientation(edge);
+    return { right: cornerDistanceMm(order, calibration, here, RIGHT_OF[here]), left: cornerDistanceMm(order, calibration, LEFT_OF[here], here) };
+  };
+  const sharedTape = (draggable: boolean, edge: TapeEdge = "bottom", showControls = screen === "measure", tapeReversed = reversed, wrap = settings.wrapCorners) => <TapeRuler
     offset={tapeOffset}
     scaleMm={rulerScale}
     units={settings.units}
@@ -799,6 +813,10 @@ export default function Home() {
     onReset={resetTapeZero}
     onEnableMotion={screen === "measure" ? enableMotion : () => undefined}
     manualAdvance={settings.manualAdvance}
+    wrap={wrap}
+    cornerRadius={settings.cornerRadius ?? autoRadius}
+    cornerDistances={cornerDistancesFor(edge)}
+    gravityRef={gravityRef}
   />;
 
   const measureEdge = tapeEdgeForOrientation(detectedOrientation);
@@ -809,8 +827,8 @@ export default function Home() {
 
   return <main className="app-shell">
     {screen === "measure" && <MeasureScreen calibrated={calibration.every((value) => value > 0)} edge={measureEdge} motionEnabled={motionEnabled} manualAdvance={settings.manualAdvance} motionNotice={motionNotice} precisionReading={precisionReading} precisionSecondReading={precisionSecondReading} precisionDisplayLabel={precisionDisplayLabel} precisionIsDifference={precisionIsDifference} precisionFrozen={precisionFrozen} draftMeasurements={draftMeasurements} onPrecisionPoint={capturePrecisionReading} onPrecisionFreeze={freezePrecisionReading} onPrecisionDismiss={dismissPrecisionReading} onSaveMeasurement={saveMemoryReading} onAddMeasurementPart={addMemoryPart} onEnableMotion={enableMotion} onMemory={openMemory} onSettings={openSettings}>{sharedTape(false, measureEdge)}</MeasureScreen>}
-    {screen === "calibration" && <CalibrationScreen phase={calibrationPhase} detectedOrientation={detectedOrientation} turns={calibrationTurns} notice={calibrationNotice} rulerScale={rulerScale} onScale={(value) => setRulerScale(clamp(value, 2.5, 10))} onSaveScale={saveScale} onCaptureStart={captureStart} onSaveAlignment={saveAlignment} onBack={goToMeasure} onFinish={goToMeasure}>{sharedTape(true, calibrationPhase === "rolling" ? tapeEdgeForOrientation(detectedOrientation) : "bottom", false, false)}</CalibrationScreen>}
-    {screen === "settings" && <SettingsScreen calibrated={calibration.every((value) => value > 0)} settings={settings} onChangeSettings={updateSettings} onReset={resetCalibration} onCalibrate={openCalibration} onBack={goToMeasure} />}
+    {screen === "calibration" && <CalibrationScreen phase={calibrationPhase} detectedOrientation={detectedOrientation} turns={calibrationTurns} notice={calibrationNotice} rulerScale={rulerScale} onScale={(value) => setRulerScale(clamp(value, 2.5, 10))} onSaveScale={saveScale} onCaptureStart={captureStart} onSaveAlignment={saveAlignment} onBack={goToMeasure} onFinish={goToMeasure}>{sharedTape(true, calibrationPhase === "rolling" ? tapeEdgeForOrientation(detectedOrientation) : "bottom", false, false, false)}</CalibrationScreen>}
+    {screen === "settings" && <SettingsScreen calibrated={calibration.every((value) => value > 0)} autoRadius={autoRadius} settings={settings} onChangeSettings={updateSettings} onReset={resetCalibration} onCalibrate={openCalibration} onBack={goToMeasure} />}
     {screen === "memory" && <MemoryScreen entries={memoryEntries} onDelete={(ids) => setMemoryEntries((current) => current.filter((entry) => !ids.includes(entry.id)))} onBack={goToMeasure} />}
   </main>;
 }
@@ -1005,33 +1023,198 @@ function MeasurementParts({ parts, compact = false }: { parts: string[]; compact
   return <>{parts.map((part, index) => <span className="memory-part" key={`${part}-${index}`}><MeasurementText label={part} compact={compact} />{index < parts.length - 1 && <em>x</em>}</span>)}</>;
 }
 
-function SettingsScreen({ calibrated, settings, onChangeSettings, onReset, onCalibrate, onBack }: { calibrated: boolean; settings: UserSettings; onChangeSettings: (settings: UserSettings) => void; onReset: () => void; onCalibrate: () => void; onBack: () => void }) {
+function SettingsScreen({ calibrated, autoRadius, settings, onChangeSettings, onReset, onCalibrate, onBack }: { calibrated: boolean; autoRadius: number; settings: UserSettings; onChangeSettings: (settings: UserSettings) => void; onReset: () => void; onCalibrate: () => void; onBack: () => void }) {
   const [confirming, setConfirming] = useState(false);
   const setSetting = <K extends keyof UserSettings>(key: K, value: UserSettings[K]) => onChangeSettings({ ...settings, [key]: value });
-  return <section className="settings-screen"><header className="page-header"><button onClick={onBack}>‹ Ruler</button><span>Settings</span></header><div className="settings-card"><h1>Ruler settings</h1><div className="settings-group"><div className="setting-row"><div><strong>Ruler labels</strong><span>Choose inches or millimeters</span></div><div className="segmented-control"><button className={settings.units === "in" ? "selected" : ""} onClick={() => setSetting("units", "in")}>in</button><button className={settings.units === "mm" ? "selected" : ""} onClick={() => setSetting("units", "mm")}>mm</button></div></div><ToggleRow label="Manual rolling" detail="Use the ruler arrows to step forward and back instead of orientation." checked={settings.manualAdvance} onChange={(checked) => setSetting("manualAdvance", checked)} /></div><div className="settings-group calibration-settings"><strong>Tape calibration</strong><p>{calibrated ? "Four orientation-aware rolling distances are saved on this device." : "No complete tape calibration is saved yet."}</p><button className="action-button calibrate-settings-button" onClick={onCalibrate}>Calibrate tape</button>{confirming ? <div className="reset-row"><button className="action-button danger" onClick={() => { onReset(); setConfirming(false); }}>Reset calibration</button><button className="plain-button" onClick={() => setConfirming(false)}>Cancel</button></div> : <button className="plain-button danger-text" onClick={() => setConfirming(true)}>Reset calibration</button>}</div></div></section>;
+  return <section className="settings-screen"><header className="page-header"><button onClick={onBack}>‹ Ruler</button><span>Settings</span></header><div className="settings-card"><h1>Ruler settings</h1><div className="settings-group"><div className="setting-row"><div><strong>Ruler labels</strong><span>Choose inches or millimeters</span></div><div className="segmented-control"><button className={settings.units === "in" ? "selected" : ""} onClick={() => setSetting("units", "in")}>in</button><button className={settings.units === "mm" ? "selected" : ""} onClick={() => setSetting("units", "mm")}>mm</button></div></div><ToggleRow label="Manual rolling" detail="Use the ruler arrows to step forward and back instead of orientation." checked={settings.manualAdvance} onChange={(checked) => setSetting("manualAdvance", checked)} /><ToggleRow label="Wrap around corners" detail="Continue the tape around the bottom corners and fade it up the sides, with a live contact needle while tilted." checked={settings.wrapCorners} onChange={(checked) => setSetting("wrapCorners", checked)} />{settings.wrapCorners && <div className="setting-row corner-row"><div><strong>Screen corner</strong><span>{settings.cornerRadius === null ? `Auto · ${autoRadius} px` : `${settings.cornerRadius} px`} — match the tape curve to your display</span></div><div className="corner-control"><input className="scale-slider corner-slider" aria-label="Screen corner radius" type="range" min="0" max="90" step="1" value={settings.cornerRadius ?? autoRadius} onChange={(event) => setSetting("cornerRadius", Number(event.target.value))} />{settings.cornerRadius !== null && <button className="plain-button" onClick={() => setSetting("cornerRadius", null)}>Auto</button>}</div></div>}</div><div className="settings-group calibration-settings"><strong>Tape calibration</strong><p>{calibrated ? "Four orientation-aware rolling distances are saved on this device." : "No complete tape calibration is saved yet."}</p><button className="action-button calibrate-settings-button" onClick={onCalibrate}>Calibrate tape</button>{confirming ? <div className="reset-row"><button className="action-button danger" onClick={() => { onReset(); setConfirming(false); }}>Reset calibration</button><button className="plain-button" onClick={() => setConfirming(false)}>Cancel</button></div> : <button className="plain-button danger-text" onClick={() => setConfirming(true)}>Reset calibration</button>}</div></div></section>;
 }
 
 function ToggleRow({ label, detail, checked, disabled = false, onChange }: { label: string; detail: string; checked: boolean; disabled?: boolean; onChange: (checked: boolean) => void }) {
   return <div className={`setting-row ${disabled ? "disabled" : ""}`}><div><strong>{label}</strong><span>{detail}</span></div><button className={`switch ${checked ? "on" : ""}`} aria-label={label} aria-pressed={checked} disabled={disabled} onClick={() => onChange(!checked)}><span /></button></div>;
 }
 
-function TapeRuler({ offset, scaleMm, units, edge, reversed, draggable, showControls, showEnableHint, motionNotice, manualAdvance, onOffset, onDirection, onManualStep, onReset, onEnableMotion }: { offset: number; scaleMm: number; units: "in" | "mm"; edge: TapeEdge; reversed: boolean; draggable: boolean; showControls: boolean; showEnableHint: boolean; motionNotice: string; manualAdvance: boolean; onOffset: (value: number) => void; onDirection: (reversed: boolean) => void; onManualStep: (step: -1 | 1) => void; onReset: () => void; onEnableMotion: () => void | Promise<boolean> }) {
+const TAPE_BAND = 132;
+type TickKind = "inch" | "half" | "quarter" | "eighth" | "sixteenth" | "centimeter" | "five-millimeter" | "millimeter";
+const TICK_LENGTH: Record<TickKind, number> = { inch: 94, half: 68, quarter: 54, eighth: 39, sixteenth: 26, centimeter: 94, "five-millimeter": 50, millimeter: 26 };
+/** Tick length inside a corner as a share of the corner radius, so the fan never reaches the corner's center. */
+const CORNER_TICK: Record<TickKind, number> = { inch: 0.5, half: 0.42, quarter: 0.34, eighth: 0.26, sixteenth: 0.18, centimeter: 0.5, "five-millimeter": 0.36, millimeter: 0.2 };
+type TapeSide = "main" | "left" | "right";
+type TapePoint = { x: number; y: number; nx: number; ny: number; side: TapeSide; corner: boolean; taper: number };
+type TapeGeometry = { W: number; H: number; r: number; wrap: boolean; offset: number; ppmm: number; uL1: number; uR1: number; gapL: number; gapR: number; fadeH: number };
+
+/**
+ * Stage coordinates: the down edge is y = H, x runs left to right along it.
+ * "u" is a table position in px relative to tape zero (value = direction·u/ppmm).
+ * The flat bottom covers u ∈ [uL1, uR1]. Each rounded corner spans a gap of u
+ * whose size comes from the calibrated roll distance for that corner, so the
+ * side bands line up exactly with what the tape shows after rolling onto them.
+ * Inside a corner the value grows linearly with angle, which is what a rounded
+ * case does when it rolls without slipping.
+ */
+const tapeGeometry = (W: number, H: number, radius: number, wrap: boolean, offset: number, ppmm: number, corners: CornerDistances): TapeGeometry => {
+  const r = wrap ? clamp(radius, 4, Math.min(W, H) / 2 - 1) : 0;
+  const gapFor = (mm: number | null, span: number) => Math.max(r * 0.5, mm ? mm * ppmm - Math.max(0, span - 2 * r) : 2 * r);
+  return {
+    W, H, r, wrap, offset, ppmm,
+    uL1: r - offset,
+    uR1: W - r - offset,
+    gapL: gapFor(corners.left, H),
+    gapR: gapFor(corners.right, W),
+    fadeH: wrap ? clamp(H * 0.55, TAPE_BAND + 60, 380) : 0,
+  };
+};
+const placeOnTape = (g: TapeGeometry, u: number): TapePoint | null => {
+  const x = u + g.offset;
+  if (!g.wrap) return x < -60 || x > g.W + 60 ? null : { x, y: g.H, nx: 0, ny: -1, side: "main", corner: false, taper: Infinity };
+  const { W, H, r } = g;
+  if (u >= g.uL1 && u <= g.uR1) return { x, y: H, nx: 0, ny: -1, side: "main", corner: false, taper: Math.min(x - r, W - r - x) };
+  if (u > g.uR1 && u < g.uR1 + g.gapR) {
+    const phi = ((u - g.uR1) / g.gapR) * Math.PI / 2;
+    const s = Math.sin(phi), c = Math.cos(phi);
+    return { x: W - r + r * s, y: H - r + r * c, nx: -s, ny: -c, side: "main", corner: true, taper: 0 };
+  }
+  if (u >= g.uR1 + g.gapR) {
+    const h = r + u - g.uR1 - g.gapR;
+    return h > g.fadeH ? null : { x: W, y: H - h, nx: -1, ny: 0, side: h > TAPE_BAND ? "right" : "main", corner: false, taper: h - r };
+  }
+  if (u > g.uL1 - g.gapL) {
+    const phi = ((g.uL1 - u) / g.gapL) * Math.PI / 2;
+    const s = Math.sin(phi), c = Math.cos(phi);
+    return { x: r - r * s, y: H - r + r * c, nx: s, ny: -c, side: "main", corner: true, taper: 0 };
+  }
+  const h = r + (g.uL1 - g.gapL) - u;
+  return h > g.fadeH ? null : { x: 0, y: H - h, nx: 1, ny: 0, side: h > TAPE_BAND ? "left" : "main", corner: false, taper: h - r };
+};
+type TapeLabel = { key: number; x: number; y: number; rotate: number; text: string; size: number; major: boolean };
+type TapeLayer = { thin: string; thick: string; labels: TapeLabel[] };
+const buildTape = (g: TapeGeometry, units: UserSettings["units"], direction: number) => {
+  const layers: Record<TapeSide, TapeLayer> = { main: { thin: "", thick: "", labels: [] }, left: { thin: "", thick: "", labels: [] }, right: { thin: "", thick: "", labels: [] } };
+  const uMin = g.wrap ? g.uL1 - g.gapL - (g.fadeH - g.r) : -g.offset - 60;
+  const uMax = g.wrap ? g.uR1 + g.gapR + (g.fadeH - g.r) : g.W - g.offset + 60;
+  const lo = Math.max(0, Math.min(direction * uMin, direction * uMax) / g.ppmm);
+  const hi = Math.max(0, Math.max(direction * uMin, direction * uMax) / g.ppmm);
+  const stepMm = units === "in" ? 25.4 / 16 : 1;
+  const start = Math.floor(lo / stepMm);
+  const end = Math.min(Math.ceil(hi / stepMm), start + 1500);
+  const fractionText: Record<number, string> = { 4: "¼", 8: "½", 12: "¾" };
+  for (let n = start; n <= end; n += 1) {
+    const p = placeOnTape(g, direction * n * stepMm * g.ppmm);
+    if (!p) continue;
+    let kind: TickKind;
+    let text = "";
+    let size = 10;
+    if (units === "in") {
+      const fraction = n % 16;
+      kind = fraction === 0 ? "inch" : fraction % 8 === 0 ? "half" : fraction % 4 === 0 ? "quarter" : fraction % 2 === 0 ? "eighth" : "sixteenth";
+      if (fraction === 0 && n > 0) { text = String(n / 16); size = 17; }
+      else if (!p.corner && fractionText[fraction]) { text = fractionText[fraction]; size = fraction === 8 ? 15 : 13; }
+    } else {
+      const remainder = n % 10;
+      kind = remainder === 0 ? "centimeter" : remainder === 5 ? "five-millimeter" : "millimeter";
+      if (remainder === 0 && n > 0) { text = String(n / 10); size = 17; }
+    }
+    if (p.corner && text) size = 13;
+    const cornerLength = Math.min(TICK_LENGTH[kind], g.r * CORNER_TICK[kind]);
+    const length = p.corner ? cornerLength : Math.min(TICK_LENGTH[kind], cornerLength + Math.max(0, p.taper));
+    const layer = layers[p.side];
+    const segment = `M${p.x.toFixed(1)} ${p.y.toFixed(1)}L${(p.x + p.nx * length).toFixed(1)} ${(p.y + p.ny * length).toFixed(1)}`;
+    if (kind === "inch" || kind === "centimeter") layer.thick += segment;
+    else layer.thin += segment;
+    if (text) {
+      const distance = length + 5 + size * 0.5;
+      layer.labels.push({ key: n, x: p.x + p.nx * distance, y: p.y + p.ny * distance, rotate: Math.atan2(p.nx, -p.ny) * 180 / Math.PI, text, size, major: size >= 13 && (kind === "inch" || kind === "centimeter") });
+    }
+  }
+  return layers;
+};
+/** Gravity (iOS sense, device axes) → stage axes, where +y points at the down edge. */
+const stageGravity = (v: Vec, edge: TapeEdge) => {
+  const sx = v.x, sy = -v.y;
+  if (edge === "right") return { x: -sy, y: sx };
+  if (edge === "top") return { x: -sx, y: -sy };
+  if (edge === "left") return { x: sy, y: -sx };
+  return { x: sx, y: sy };
+};
+
+function TapeLayerView({ layer }: { layer: TapeLayer }) {
+  return <>
+    {layer.thin && <path className="tape-ticks" d={layer.thin} strokeWidth={1.5} />}
+    {layer.thick && <path className="tape-ticks" d={layer.thick} strokeWidth={2} />}
+    {layer.labels.map((label) => <text key={label.key} className={`tape-label ${label.major ? "major" : ""}`} transform={`translate(${label.x.toFixed(1)} ${label.y.toFixed(1)}) rotate(${label.rotate.toFixed(1)})`} fontSize={label.size} textAnchor="middle" dominantBaseline="central">{label.text}</text>)}
+  </>;
+}
+
+function TapeRuler({ offset, scaleMm, units, edge, reversed, draggable, showControls, showEnableHint, motionNotice, manualAdvance, wrap, cornerRadius, cornerDistances, gravityRef, onOffset, onDirection, onManualStep, onReset, onEnableMotion }: { offset: number; scaleMm: number; units: "in" | "mm"; edge: TapeEdge; reversed: boolean; draggable: boolean; showControls: boolean; showEnableHint: boolean; motionNotice: string; manualAdvance: boolean; wrap: boolean; cornerRadius: number; cornerDistances: CornerDistances; gravityRef: MutableRefObject<Vec | null>; onOffset: (value: number) => void; onDirection: (reversed: boolean) => void; onManualStep: (step: -1 | 1) => void; onReset: () => void; onEnableMotion: () => void | Promise<boolean> }) {
   const drag = useRef<{ pointerId: number; startCoordinate: number; startOffset: number; edge: TapeEdge } | null>(null);
-  const [tapeSpan, setTapeSpan] = useState(() => fallbackTapeSpanForEdge(edge));
+  const stageRef = useRef<HTMLDivElement>(null);
+  const leftRef = useRef<SVGGElement>(null);
+  const rightRef = useRef<SVGGElement>(null);
+  const markerRef = useRef<SVGGElement>(null);
+  const markerTextRef = useRef<SVGTextElement>(null);
+  const markerPillRef = useRef<SVGRectElement>(null);
+  const [size, setSize] = useState(() => edge === "left" || edge === "right" ? { W: 844, H: 390 } : { W: 390, H: 844 });
   useEffect(() => {
-    const updateTapeSpan = () => setTapeSpan(tapeSpanForEdge(edge));
-    updateTapeSpan();
-    window.addEventListener("resize", updateTapeSpan);
-    window.visualViewport?.addEventListener("resize", updateTapeSpan);
-    return () => {
-      window.removeEventListener("resize", updateTapeSpan);
-      window.visualViewport?.removeEventListener("resize", updateTapeSpan);
-    };
+    const stage = stageRef.current;
+    if (!stage) return;
+    const measure = () => setSize((current) => current.W === stage.clientWidth && current.H === stage.clientHeight ? current : { W: stage.clientWidth, H: stage.clientHeight });
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(stage);
+    return () => observer.disconnect();
   }, [edge]);
-  const pixelsPerUnit = units === "in" ? scaleMm * 25.4 : scaleMm;
   const direction = reversed ? -1 : 1;
-  const imperialTicks = units === "in" ? buildImperialTicks(offset, direction, pixelsPerUnit, tapeSpan) : [];
-  const metricTicks = units === "mm" ? buildMetricTicks(offset, direction, pixelsPerUnit, tapeSpan) : [];
+  const geometry = useMemo(() => tapeGeometry(size.W, size.H, cornerRadius, wrap, offset, scaleMm, cornerDistances), [size.W, size.H, cornerRadius, wrap, offset, scaleMm, cornerDistances.left, cornerDistances.right]); // eslint-disable-line react-hooks/exhaustive-deps
+  const layers = useMemo(() => buildTape(geometry, units, direction), [geometry, units, direction]);
+  const live = useRef({ geometry, units, direction });
+  useEffect(() => { live.current = { geometry, units, direction }; }, [geometry, units, direction]);
+
+  // Gravity-driven contact needle and side fades run outside React at display rate.
+  useEffect(() => {
+    if (!wrap) return;
+    let frame = 0;
+    let smooth: number | null = null;
+    let shownText = "";
+    let lastLeft = -1, lastRight = -1;
+    const step = () => {
+      frame = requestAnimationFrame(step);
+      const { geometry: g, units: liveUnits, direction: liveDirection } = live.current;
+      const v = gravityRef.current;
+      let theta: number | null = null;
+      if (v) {
+        const s = stageGravity(v, edge);
+        if (Math.hypot(s.x, s.y) > 2.5) theta = Math.atan2(s.x, s.y) * 180 / Math.PI;
+      }
+      smooth = theta === null ? null : smooth === null ? theta : smooth + (theta - smooth) * 0.3;
+      const tilt = smooth ?? 0;
+      const rightOpacity = 0.38 + 0.62 * clamp(tilt / 35, 0, 1);
+      const leftOpacity = 0.38 + 0.62 * clamp(-tilt / 35, 0, 1);
+      if (Math.abs(rightOpacity - lastRight) > 0.01) { rightRef.current?.setAttribute("opacity", rightOpacity.toFixed(2)); lastRight = rightOpacity; }
+      if (Math.abs(leftOpacity - lastLeft) > 0.01) { leftRef.current?.setAttribute("opacity", leftOpacity.toFixed(2)); lastLeft = leftOpacity; }
+      const marker = markerRef.current;
+      if (!marker) return;
+      const angle = Math.abs(tilt);
+      if (smooth === null || angle < 3 || angle > 89) { marker.setAttribute("opacity", "0"); return; }
+      const onRight = tilt > 0;
+      const phi = angle * Math.PI / 180;
+      const px = (onRight ? g.W - g.r : g.r) + (onRight ? 1 : -1) * g.r * Math.sin(phi);
+      const py = g.H - g.r + g.r * Math.cos(phi);
+      const u = onRight ? g.uR1 + (angle / 90) * g.gapR : g.uL1 - (angle / 90) * g.gapL;
+      const mm = liveDirection * u / g.ppmm;
+      marker.setAttribute("opacity", clamp((angle - 3) / 5, 0, 1).toFixed(2));
+      marker.setAttribute("transform", `translate(${px.toFixed(1)} ${py.toFixed(1)}) rotate(${(-tilt).toFixed(1)})`);
+      const text = mm < 0 ? "before 0" : formatMeasurement(mm, liveUnits);
+      if (text !== shownText && markerTextRef.current && markerPillRef.current) {
+        shownText = text;
+        markerTextRef.current.textContent = text;
+        const width = text.length * 8.6 + 24;
+        markerPillRef.current.setAttribute("x", String(-width / 2));
+        markerPillRef.current.setAttribute("width", String(width));
+      }
+    };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  }, [wrap, edge, gravityRef]);
+
   const dragCoordinate = (event: ReactPointerEvent<HTMLDivElement>, tapeEdge: TapeEdge) => {
     if (tapeEdge === "top") return -event.clientX;
     if (tapeEdge === "right") return -event.clientY;
@@ -1051,30 +1234,55 @@ function TapeRuler({ offset, scaleMm, units, edge, reversed, draggable, showCont
   const endDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     if (drag.current?.pointerId === event.pointerId) drag.current = null;
   };
-  const readiness = motionNotice;
+  const { W, H, r, fadeH } = geometry;
+  const band = TAPE_BAND;
+  const mainBand = wrap
+    ? `M0 ${H - band}H${W}V${H - r}A${r} ${r} 0 0 1 ${W - r} ${H}H${r}A${r} ${r} 0 0 1 0 ${H - r}Z`
+    : `M0 ${H - band}H${W}V${H}H0Z`;
   return <>
-    {showControls && <div className={`tape-control-stage control-orientation-${edge}`}>
+    {showControls && <div className={`tape-control-stage control-orientation-${edge} ${wrap ? "wrap-controls" : ""}`}>
       <div className={`tape-controls ${manualAdvance ? "manual-controls" : ""}`} aria-label={manualAdvance ? "Manual ruler step controls" : "Ruler direction and zero controls"}>{manualAdvance ? <><button aria-label="Step backward" onClick={() => onManualStep(-1)}>←</button><button className="zero-button" onClick={onReset}>0</button><button aria-label="Step forward" onClick={() => onManualStep(1)}>→</button></> : <><button className={!reversed ? "selected" : ""} aria-label="Measure right" onClick={() => onDirection(false)}>→</button><button className="zero-button" onClick={onReset}>0</button><button className={reversed ? "selected" : ""} aria-label="Measure left" onClick={() => onDirection(true)}>←</button></>}</div>
     </div>}
-    <aside className={`tape-ruler edge-${edge} ${showEnableHint ? "is-inactive" : ""}`} aria-label="Construction tape ruler">
-      <div className={`tape-viewport ${draggable ? "is-draggable" : ""}`} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}>
+    <div ref={stageRef} className={`tape-stage tape-orientation-${edge}`} aria-label="Construction tape ruler" role="img">
+      <svg className="tape-svg" width={W} height={H} viewBox={`0 0 ${W} ${H}`} aria-hidden="true">
+        {wrap && <defs>
+          <linearGradient id="tape-side-fade" gradientUnits="userSpaceOnUse" x1="0" y1={H - band} x2="0" y2={H - fadeH}>
+            <stop offset="0" stopColor="#fff" stopOpacity="1" />
+            <stop offset="0.55" stopColor="#fff" stopOpacity="0.55" />
+            <stop offset="1" stopColor="#fff" stopOpacity="0" />
+          </linearGradient>
+          <mask id="tape-side-mask" maskUnits="userSpaceOnUse" x="0" y="0" width={W} height={H}>
+            <rect x="0" y={H - fadeH} width={W} height={fadeH - band + 1} fill="url(#tape-side-fade)" />
+          </mask>
+        </defs>}
+        {wrap && <>
+          <g ref={leftRef} opacity="0.38" mask="url(#tape-side-mask)">
+            <rect className="tape-band" x="0" y={H - fadeH} width={band} height={fadeH - band + 1} />
+            <path className="tape-edge" d={`M${band} ${H - band}V${H - fadeH}`} />
+            <TapeLayerView layer={layers.left} />
+          </g>
+          <g ref={rightRef} opacity="0.38" mask="url(#tape-side-mask)">
+            <rect className="tape-band" x={W - band} y={H - fadeH} width={band} height={fadeH - band + 1} />
+            <path className="tape-edge" d={`M${W - band} ${H - band}V${H - fadeH}`} />
+            <TapeLayerView layer={layers.right} />
+          </g>
+        </>}
+        <path className="tape-band" d={mainBand} />
+        <path className="tape-edge" d={wrap ? `M${band} ${H - band}H${W - band}` : `M0 ${H - band}H${W}`} />
+        <TapeLayerView layer={layers.main} />
+        {wrap && <g ref={markerRef} className="contact-marker" opacity="0">
+          <line className="contact-needle" x1="0" y1="0" x2="0" y2="-138" />
+          <circle className="contact-dot" r="5" />
+          <g transform="translate(0 -158)">
+            <rect ref={markerPillRef} className="contact-pill" x="-40" y="-15" width="80" height="30" rx="15" />
+            <text ref={markerTextRef} className="contact-text" textAnchor="middle" dominantBaseline="central" />
+          </g>
+        </g>}
+      </svg>
+      <div className={`tape-hit ${draggable ? "is-draggable" : ""}`} onPointerDown={startDrag} onPointerMove={moveDrag} onPointerUp={endDrag} onPointerCancel={endDrag}>
         {showEnableHint && <button className="motion-hint" onClick={() => void onEnableMotion()}>Tap to enable rolling</button>}
-        {readiness && <span className="motion-status">{readiness}</span>}
-        {units === "in"
-          ? imperialTicks.map(({ division, x, inch, fraction }) => <TapeTick key={division} x={x} inch={inch} fraction={fraction} />)
-          : metricTicks.map(({ millimeter, x, centimeter, remainder }) => <MetricTick key={millimeter} x={x} centimeter={centimeter} remainder={remainder} />)}
+        {motionNotice && <span className="motion-status">{motionNotice}</span>}
       </div>
-    </aside>
+    </div>
   </>;
-}
-
-function TapeTick({ x, inch, fraction }: { x: number; inch: number; fraction: number }) {
-  const kind = fraction === 0 ? "inch" : fraction % 8 === 0 ? "half" : fraction % 4 === 0 ? "quarter" : fraction % 2 === 0 ? "eighth" : "sixteenth";
-  const fractionText: Record<number, string> = { 0: String(inch), 4: "¼", 8: "½", 12: "¾" };
-  return <div className={`tape-tick ${kind} ${inch === 0 && fraction === 0 ? "zero-tick" : ""}`} style={{ left: x } as CSSProperties}><span>{fractionText[fraction] ?? ""}</span></div>;
-}
-
-function MetricTick({ x, centimeter, remainder }: { x: number; centimeter: number; remainder: number }) {
-  const kind = remainder === 0 ? "centimeter" : remainder === 5 ? "five-millimeter" : "millimeter";
-  return <div className={`tape-tick metric ${kind}`} style={{ left: x } as CSSProperties}><span>{remainder === 0 ? String(centimeter) : ""}</span></div>;
 }
